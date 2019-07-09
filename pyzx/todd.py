@@ -37,9 +37,10 @@ from .linalg import Mat2, column_optimal_swap
 from .extract import permutation_as_swaps
 from .phasepoly import parity_network
 
+# TOPT_LOCATION = ["../TOpt/bin/TOpt"]
+# USE_REED_MULLER = True
 TOPT_LOCATION = None
 USE_REED_MULLER = False
-
 
 class ParityPolynomial:
     """Class used to represent phase polynomials in the standard
