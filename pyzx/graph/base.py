@@ -50,6 +50,9 @@ class Scalar(object):
             s += "(1+exp({}ipi))".format(str(node))
         return s
 
+    def __complex__(self):
+        return self.to_number()
+
     def copy(self):
         s = Scalar()
         s.power2 = self.power2
@@ -60,10 +63,10 @@ class Scalar(object):
         return s
 
     def to_number(self):
-        val = math.sqrt(2)**self.power2
-        val *= cexp(self.phase)
+        val = cexp(self.phase)
         for node in self.phasenodes: # Node should be a Fraction
             val *= 1+cexp(node)
+        val *= math.sqrt(2)**self.power2
         return complex(val*self.floatfactor)
 
     def set_unknown(self):
@@ -316,10 +319,36 @@ class BaseGraph(object):
             else:
                 raise TypeError("Unknown input state " + s)
 
-    def to_tensor(self, preserve_scalar=False):
+    def apply_effect(self, effect):
+        """Inserts a state into the inputs of the graph. ``state`` should be
+        a string with every character representing an input state for each qubit.
+        The possible types of states are on of '0', '1', '+', '-' for the respective
+        kets. If '-' is specified this input is skipped."""
+        if len(effect) > len(self.outputs): raise TypeError("Too many output effects specified")
+        outputs = self.outputs.copy()
+        self.outputs = []
+        for i,s in enumerate(effect):
+            v = outputs[i]
+            if s == '/': 
+                self.outputs.append(v)
+                continue
+            if s in ('0', '1'):
+                self.scalar.add_power(-1)
+                self.set_type(v, 2)
+                if s == '1':
+                    self.set_phase(v, Fraction(1))
+            elif s in ('+', '-'):
+                self.scalar.add_power(-1)
+                self.set_type(v, 1)
+                if s == '-':
+                    self.set_phase(v, Fraction(1))
+            else:
+                raise TypeError("Unknown output effect " + s)
+
+    def to_tensor(self, preserve_scalar=True):
         """Returns a representation of the graph as a tensor using :func:`~pyzx.tensor.tensorfy`"""
         return tensorfy(self, preserve_scalar)
-    def to_matrix(self,preserve_scalar=False):
+    def to_matrix(self,preserve_scalar=True):
         """Returns a representation of the graph as a matrix using :func:`~pyzx.tensor.tensorfy`"""
         return tensor_to_matrix(tensorfy(self, preserve_scalar), len(self.inputs), len(self.outputs))
 
@@ -527,8 +556,7 @@ class BaseGraph(object):
         self.remove_vertices([vertex])
 
     def remove_isolated_vertices(self):
-        """Deletes all vertices that are not connected to any other vertex.
-        Should be replaced by a faster alternative if available in the backend."""
+        """Deletes all vertices and vertex pairs that are not connected to any other vertex."""
         rem = []
         for v in self.vertices():
             d = self.vertex_degree(v)
@@ -544,8 +572,17 @@ class BaseGraph(object):
                 # At this point w and v are only connected to each other
                 rem.append(v)
                 rem.append(w)
-                self.scalar.add_spider_pair(self.phase(v), self.phase(w))
-
+                et = self.edge_type(self.edge(v,w))
+                if self.type(v) == self.type(w):
+                    if et == 1:
+                        self.scalar.add_node(self.phase(v)+self.phase(w))
+                    else:
+                        self.scalar.add_spider_pair(self.phase(v), self.phase(w))
+                else:
+                    if et == 1:
+                        self.scalar.add_spider_pair(self.phase(v), self.phase(w))
+                    else:
+                        self.scalar.add_node(self.phase(v)+self.phase(w))
         self.remove_vertices(rem)
 
     def remove_edges(self, edges):

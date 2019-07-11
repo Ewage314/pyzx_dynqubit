@@ -189,7 +189,6 @@ def spider(g, matches):
             e = (v0,w)
             if e not in etab: etab[e] = [0,0]
             etab[e][g.edge_type((v1,w))-1] += 1
-    
     return (etab, rem_verts, [], True)
 
 def unspider(g, m, qubit=-1, row=-1):
@@ -319,28 +318,24 @@ def match_pivot_gadget(g, matchf=None, num=-1):
         
         if v0a not in (0,1):
             if v1a in (0,1):
-                t = v0
-                v0 = v1
-                v1 = t
-                t = v0a
-                v0a = v1a
-                v1a = t
+                v0, v1 = v1, v0
+                v0a, v1a = v1a, v0a
             else: continue
         elif v1a in (0,1): continue
         # Now v0 has a Pauli phase and v1 has a non-Pauli phase
         
         v0n = list(g.neighbours(v0))
         v1n = list(g.neighbours(v1))
-        if len(v0n) == 1 or len(v1n) == 1: continue # one of them is a phase gadget
+        if len(v1n) == 1: continue # It is a phase gadget
         bad_match = False
         discard_edges = []
-        for l in (v0n, v1n):
+        for i,l in enumerate((v0n, v1n)):
             for n in l:
                 if types[n] != 1: 
                     bad_match = True
                     break
                 ne = list(g.incident_edges(n))
-                if len(ne) == 1: # v0 or v1 is a phase gadget
+                if i==0 and len(ne) == 1 and not (e == ne[0]): # v0 is a phase gadget
                     bad_match = True
                     break
                 discard_edges.extend(ne)
@@ -559,7 +554,7 @@ def lcomp(g, matches):
                 he = etab.get(e, (0,0))[1]
                 etab[e] = (0, he+1)
 
-    return (etab, rem, [], False)
+    return (etab, rem, [], True)
 
 
 def match_ids(g):
@@ -627,6 +622,8 @@ def match_phase_gadgets(g):
     for v in g.vertices():
         if phases[v] != 0 and phases[v].denominator > 2 and len(list(g.neighbours(v)))==1:
             n = list(g.neighbours(v))[0]
+            if phases[n] not in (0,1): continue # Not a real phase gadget (happens for scalar diagrams)
+            if n in gadgets: continue # Not a real phase gadget (happens for scalar diagrams)
             gadgets[n] = v
             par = frozenset(set(g.neighbours(n)).difference({v}))
             if par in parities: parities[par].append(n)

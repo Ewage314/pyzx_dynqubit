@@ -26,12 +26,18 @@ from math import pi, sqrt
 
 def Z_to_tensor(arity, phase):
     m = np.zeros([2]*arity, dtype = complex)
+    if arity == 0:
+        m[()] = 1 + np.exp(1j*phase)
+        return m
     m[(0,)*arity] = 1
     m[(1,)*arity] = np.exp(1j*phase)
     return m
 
 def X_to_tensor(arity, phase):
     m = np.ones(2**arity, dtype = complex)
+    if arity == 0:
+        m[()] = 1 + np.exp(1j*phase)
+        return m
     for i in range(2**arity):
         if bin(i).count("1")%2 == 0: 
             m[i] += np.exp(1j*phase)
@@ -53,7 +59,7 @@ def pop_and_shift(verts, indices):
             indices[w] = l2
     return res
 
-def tensorfy(g, preserve_scalar=False):
+def tensorfy(g, preserve_scalar=True):
     """Takes in a Graph and outputs a multidimensional numpy array
     representing the linear map the ZX-diagram implements.
     Beware that quantum circuits take exponential memory to represent."""
@@ -104,7 +110,7 @@ def tensorfy(g, preserve_scalar=False):
             tensor = np.tensordot(tensor,t,axes=(contr,list(range(len(t.shape)-len(contr),len(t.shape)))))
             indices[v] = list(range(len(tensor.shape)-d+len(contr), len(tensor.shape)))
             
-            if preserve_scalar and i % 10 == 0:
+            if not preserve_scalar and i % 10 == 0:
                 if np.abs(tensor).max() < 10**-6: # Values are becoming too small
                     tensor *= 10**4 # So scale all the numbers up
     perm = []
@@ -138,9 +144,9 @@ def tensor_to_matrix(t, inputs, outputs):
                 #print(t[tuple(a)])
                 row.append(t[tuple(a)])
         rows.append(row)
-    return np.matrix(rows)
+    return np.array(rows)
 
-def compare_tensors(t1,t2, preserve_scalar=False):
+def compare_tensors(t1,t2, preserve_scalar=True):
     """Returns true if ``t1`` and ``t2`` are tensors equal up to a nonzero number.
 
     Example: To check whether two ZX-graphs are semantically the same you would do::
