@@ -29,6 +29,7 @@ from . import todd
 from . import linalg
 from . import extract
 from . import rules
+from . import hrules
 from . import optimize
 from . import simplify
 from . import d3

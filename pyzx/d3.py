@@ -23,8 +23,10 @@ __all__ = ['init', 'draw']
 try:
     from IPython.display import display, HTML
     in_notebook = True
+    javascript_location = '../js'
 except ImportError:
     in_notebook = False
+    javascript_location = '/js'
     try:
         from browser import document, html
         in_webpage = True
@@ -34,7 +36,8 @@ except ImportError:
 # Provides functions for displaying pyzx graphs in jupyter notebooks using d3
 
 _d3_display_seq = 0
-javascript_location = '../js'
+
+# javascript_location = '../js'
 
 # TODO: avoid duplicate (copied from drawing.py)
 def phase_to_s(a):
@@ -47,14 +50,14 @@ def phase_to_s(a):
     # unicode 0x03c0 = pi
     return ns + '\u03c0' + ds
 
-def draw(g, scale=None):
+def draw(g, scale=None, auto_hbox=True, show_labels=False):
     global _d3_display_seq
 
     if not in_notebook and not in_webpage: 
         raise Exception("This method only works when loaded in a webpage or Jupyter notebook")
 
     if not hasattr(g, 'vertices'):
-        g = g.to_graph()
+        g = g.to_graph(zh=True)
 
     _d3_display_seq += 1
     seq = _d3_display_seq
@@ -87,10 +90,12 @@ def draw(g, scale=None):
                          paths: {{d3: "d3.v4.min"}} }});
         require(['pyzx'], function(pyzx) {{
             pyzx.showGraph('#graph-output-{0}',
-            JSON.parse('{2}'), {3}, {4}, {5});
+            JSON.parse('{2}'), {3}, {4}, {5}, {6}, {7});
         }});
         </script>
-        """.format(seq, javascript_location, graphj, w, h, node_size)
+        """.format(seq, javascript_location, graphj, w, h, node_size,
+            'true' if auto_hbox else 'false',
+            'true' if show_labels else 'false')
     if in_notebook:
         display(HTML(text))
     elif in_webpage:
