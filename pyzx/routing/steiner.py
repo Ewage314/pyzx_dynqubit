@@ -167,8 +167,6 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
             next_add = next(steiner_tree)
             debug and print(next_add)
         debug and print("Step 3: profit")
-        rec_nodes = next(steiner_tree)
-        return rec_nodes
     def rec_step(cols, rows):
         size = len(rows)
         # Upper triangular form uses the same structure.
@@ -190,7 +188,6 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
                 if c in p_cols:
                     nodes = [r for r in rows if r==rows[pivot] or matrix.data[r][c] == 1]
                     usable_nodes = cols[i:]
-                    rec_nodes = [n for n in usable_nodes if n >= c]
                     rec_nodes = list(set([node for edge in architecture.distances["upper"][c][(max(usable_nodes),c)][1] for node in edge]))
                         
                     if len(nodes) > 1:

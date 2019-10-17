@@ -237,12 +237,6 @@ class Architecture():
 
     def rec_steiner_tree(self, start, nodes, usable_nodes, upper=True):
         # Builds the steiner tree with start as root, contains at least nodes and at most useable_nodes
-        
-        # Calculate which nodes will be recursed on
-        if upper:
-            rec_nodes = []
-        else:
-            rec_nodes = [n for n in usable_nodes if n >= start]
 
         # Calculate all-pairs shortest path
         distances = {}
@@ -297,7 +291,7 @@ class Architecture():
                 vs.add(edge[1])
                 yielded_edges.add(edge)
             [vs.remove(v) for v in old_vs]
-        yield None
+        yield None # Signal next phase
         # Walk the tree bottom up to remove all ones.
         while len(edges) > 0:
             # find leaf nodes:
@@ -308,9 +302,7 @@ class Architecture():
                 for edge in [e for e in edges if e[1] == v]:
                     yield edge # yield it
                     edges.remove(edge) # Remove it from the steiner tree
-        yield None
-        # Yield the rec_nodes
-        yield rec_nodes
+        yield None # Signal done
 
 def dynamic_size_architecture_name(base_name, n_qubits):
     return str(n_qubits) + "q-" + base_name
