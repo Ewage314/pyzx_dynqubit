@@ -239,19 +239,9 @@ class Architecture():
         # Builds the steiner tree with start as root, contains at least nodes and at most useable_nodes
         
         # Calculate which nodes will be recursed on
-        rec_nodes = []
-        if not upper:
-            useable_vertices = [self.vertices[i] for i in usable_nodes]
-            root_adj = [self.graph.edge_st(edge)[1] for edge in self.graph.edges() if self.graph.edge_st(edge)[0] == self.vertices[start]] 
-            root_adj += [self.graph.edge_st(edge)[0] for edge in self.graph.edges() if self.graph.edge_st(edge)[1] == self.vertices[start]]
-            root_adj = set([v for v in root_adj if v in useable_vertices]) # remove forbidden or duplicated nodes
-            if len(root_adj) > 1: # Start is not a leaf
-                # Pick the adjacent vertex with the largest index in self.vertices
-                children = sorted([self.vertices.index(k) for k in root_adj], reverse=True)
-                # Pick all (grand)children connected to the adjacent vertex without using the previous edge
-                # Their indices in self.vertices are the rec_nodes.
-                # Due to the post-order DFS numbering system, we only need the indices of the root_adj vertices to do this.
-                rec_nodes = [i for i in range(children[1]+1, children[0])] + [start]
+        if upper:
+            rec_nodes = []
+        else:
             rec_nodes = [n for n in usable_nodes if n >= start]
 
         # Calculate all-pairs shortest path
@@ -270,8 +260,8 @@ class Architecture():
         for v in vertices:
             distances[(v, v)] = (0, [])
         for i, v0 in enumerate(vertices+vertices):
-            for j, v1 in enumerate(vertices): # if upper else vertices[:i + 1] + [x for x in rec_nodes if x < i and x in vertices]):
-                for v2 in vertices: # if upper else vertices[: i + j + 1] + [x for x in rec_nodes if x < i+j and x in vertices]:
+            for j, v1 in enumerate(vertices): 
+                for v2 in vertices: 
                     if (v0, v1) in distances.keys():
                         if (v1, v2) in distances.keys():
                             if (v0, v2) not in distances.keys() \
@@ -288,10 +278,6 @@ class Architecture():
         while nodes != []:
             options = [(node, v, *distances[(v, node)]) for node in nodes for v in (vertices + steiner_pnts) if
                         (v, node) in distances.keys()]
-            if options == []:
-                print(nodes, vertices, edges, steiner_pnts, start, usable_nodes)
-                [print(k, v) for k,v in distances.items()]
-                print("")
             best_option = min(options, key=lambda x: x[2])
             vertices.append(best_option[0])
             edges += best_option[3]
@@ -300,13 +286,13 @@ class Architecture():
             nodes.remove(best_option[0])
         edges = list(set(edges)) #removes duplicates
 
-        vs = {start}
+        vs = {start} # Start with the root
         n_edges = len(edges)
         yielded_edges = set()
         while len(yielded_edges) < n_edges:
-            es = [e for e in edges for v in vs if e[0] == v]
+            es = [e for e in edges for v in vs if e[0] == v] # Find all vertices connected to previously yielded vertices
             old_vs = [v for v in vs]
-            for edge in es:
+            for edge in es: # yield the corresponding edges.
                 yield edge
                 vs.add(edge[1])
                 yielded_edges.add(edge)
@@ -320,8 +306,8 @@ class Architecture():
             for v in vs_to_consider:
                 # Get the edge that is connected to this leaf node
                 for edge in [e for e in edges if e[1] == v]:
-                    yield edge
-                    edges.remove(edge)
+                    yield edge # yield it
+                    edges.remove(edge) # Remove it from the steiner tree
         yield None
         # Yield the rec_nodes
         yield rec_nodes
