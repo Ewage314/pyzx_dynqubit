@@ -15,8 +15,8 @@ from .architecture import create_fully_connected_architecture, create_architectu
 from ..parity_maps import CNOT_tracker
 from ..machine_learning import GeneticAlgorithm
 from ..utils import make_into_list
-#from .steiner import steiner_gauss
-from .steiner import rec_steiner_gauss as steiner_gauss
+from .steiner import steiner_gauss
+#from .steiner import rec_steiner_gauss as steiner_gauss
 
 debug = False
 
