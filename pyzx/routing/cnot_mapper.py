@@ -15,7 +15,8 @@ from .architecture import create_fully_connected_architecture, create_architectu
 from ..parity_maps import CNOT_tracker
 from ..machine_learning import GeneticAlgorithm
 from ..utils import make_into_list
-from .steiner import steiner_gauss
+#from .steiner import steiner_gauss
+from .steiner import rec_steiner_gauss as steiner_gauss
 
 debug = False
 
@@ -285,6 +286,7 @@ def batch_map_cnot_circuits(source, modes, architectures, n_qubits=None, populat
 
     if len(metrics) > 0 and DataFrame is not None:
         df = DataFrame(metrics)
+        print("Average gate count:", df["n_cnots"].mean())
         if os.path.exists(metrics_file): # append to the file - do not overwrite!
             df.to_csv(metrics_file, columns=get_metric_header(), header=False, index=False, mode='a')
         else:
