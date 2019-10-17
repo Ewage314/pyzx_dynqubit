@@ -300,67 +300,28 @@ class Architecture():
             nodes.remove(best_option[0])
         edges = list(set(edges)) #removes duplicates
 
-        # TODO adjust code below!!!
-        # Yield the steiner tree top-down
         vs = {start}
         n_edges = len(edges)
         yielded_edges = set()
-        #debug_count = 0
-        #yield_count = 0
-        #warning = 0
         while len(yielded_edges) < n_edges:
             es = [e for e in edges for v in vs if e[0] == v]
             old_vs = [v for v in vs]
-            #yielded = False
             for edge in es:
                 yield edge
                 vs.add(edge[1])
-            #    if edge in yielded_edges:
-            #        print("DOUBLE yielding! - should not be possible!")
                 yielded_edges.add(edge)
-            #    yielded = True
-            #    yield_count += 1
             [vs.remove(v) for v in old_vs]
-            #if not yielded:
-            #    debug and print("leaf!")
-            #    debug_count += 1
-            #    if debug_count > len(vertices):
-            #        print("infinite loop!", warning)
-            #        warning += 1
-            #if yield_count > len(edges):
-            #    print("Yielded more edges than existing... This should not be possible!", warning)
-            #    warning += 1
-            #if warning > 5:
-            #    print(state, yielded_edges)
-                # input("note it down")
-            #    break
         yield None
         # Walk the tree bottom up to remove all ones.
-        #yield_count = 0
         while len(edges) > 0:
             # find leaf nodes:
-            #debug and print(vertices, steiner_pnts, edges)
             vs_to_consider = [vertex for vertex in vertices if vertex not in [e0 for e0, e1 in edges]] + \
                                 [vertex for vertex in steiner_pnts if vertex not in [e0 for e0, e1 in edges]]
-            #yielded = False
             for v in vs_to_consider:
                 # Get the edge that is connected to this leaf node
                 for edge in [e for e in edges if e[1] == v]:
                     yield edge
                     edges.remove(edge)
-            #        yielded = True
-            #        yield_count += 1
-                    # yield map(lambda i: self.qubit_map[i], edge)
-            #if not yielded:
-            #    print("Infinite loop!", warning)
-            #    warning += 1
-            #if yield_count > n_edges:
-            #    print("Yielded more edges than existing again... This should not be possible!!", warning)
-            #    warning += 1
-            #if warning > 10:
-            #    print(state, edges, yield_count)
-                # input("Note it down!")
-            #    break
         yield None
         # Yield the rec_nodes
         yield rec_nodes
