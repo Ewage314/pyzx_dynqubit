@@ -235,7 +235,7 @@ class Architecture():
                 break
         yield None
 
-    def rec_steiner_tree(self, start, nodes, usable_nodes, upper=True):
+    def rec_steiner_tree(self, start, nodes, usable_nodes, rec_nodes, upper=True):
         # Builds the steiner tree with start as root, contains at least nodes and at most useable_nodes
 
         # Calculate all-pairs shortest path
