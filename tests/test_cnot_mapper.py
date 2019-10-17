@@ -19,7 +19,7 @@ class TestSteiner(unittest.TestCase):
     def setUp(self):
         self.n_qubits = 9
         name = REC_ARCH
-        self.n_tests = 1
+        self.n_tests = 5
         self.arch = create_architecture(name, n_qubits=self.n_qubits)
         depth = 20
         self.circuit = [CNOT_tracker(self.arch.n_qubits) for _ in range(self.n_tests)]

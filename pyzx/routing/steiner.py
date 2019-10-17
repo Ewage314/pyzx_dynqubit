@@ -176,47 +176,31 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
         pivot = 0
         rows2 = [r for r in range(len(matrix.data[0])) if r in rows]
         cols2 = [c for c in range(len(matrix.data)) if c in cols]
-        for i, c in enumerate(cols2):#range(cols):
-            if pivot < size:#rows:
+        for i, c in enumerate(cols2):
+            if pivot < size:
                 nodes = [r for r in rows2[pivot:] if rows2[pivot]==r or matrix.data[r][c] == 1]
                 steiner_reduce(c, rows2[pivot], nodes, cols2[i:], True)
                 if matrix.data[rows2[pivot]][c] == 1:
                     p_cols.append(c)
                     pivot += 1
-        debug and print("Upper triangle form", matrix.data)
-        #rank = pivot
-        debug and print(p_cols)
+        # Full reduce requires the recursion
         if full_reduce:
             pivot -= 1
-            #for c in reversed(p_cols):
             for i, c in enumerate(cols):
                 if c in p_cols:
-                    debug and print(pivot, [r[c] for r in matrix.data])
                     nodes = [r for r in rows if r==rows[pivot] or matrix.data[r][c] == 1]
-                    #print("matrix\n",np.asarray(matrix.data, dtype=np.int32))
-                    #print("nodes and start", nodes, c, rows[pivot])
-                    #usable_nodes = [j for j in cols if j not in p_cols or p_cols.index(j) <= p_cols.index(c) or j in rec_nodes]
                     usable_nodes = cols[i:]
-                    #print("Usable nodes:", usable_nodes)
                     rec_nodes = [n for n in usable_nodes if n >= c]
-                    #print(architecture.distances["upper"][0].keys())
                     rec_nodes = list(set([node for edge in architecture.distances["upper"][c][(max(usable_nodes),c)][1] for node in edge]))
-                    #print("rec nodes new:",rec_nodes)
                         
                     if len(nodes) > 1:
                         steiner_reduce(c, rows[pivot], nodes, usable_nodes, False)
                         
                     # Do recursion on the given nodes.
                     if len(rec_nodes) > 1:
-                       # print("RECURSION!")
-                        #print(rec_nodes)
                         rec_step(list(reversed(rec_nodes)), rec_nodes)
-                        #print("submatrix", np.asarray(matrix.data, dtype=np.int32)[rec_nodes][:,rec_nodes])
-                        #print("FINISHED RECURSION!")
                 pivot -= 1
         #return rank
     qubit_order = architecture.reduce_order
-    rec_step(qubit_order, list(reversed(qubit_order)))#[i for i in range(matrix.rows())], [i for i in range(matrix.cols())]) #start with the full matrix.
-    print("DONE!")
-    print("matrix\n",np.asarray(matrix.data, dtype=np.int32))
+    rec_step(qubit_order, list(reversed(qubit_order)))
     
