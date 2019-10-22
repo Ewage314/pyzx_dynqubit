@@ -164,7 +164,7 @@ class TestSteiner(unittest.TestCase):
                     circuits, perms, score = sequential_gauss([Mat2(np.copy(m)) for m in matrices], mode=mode, architecture=self.arch, full_reduce=True, 
                                                                 n_steps=5, swarm_size=5, population_size=5, n_iterations=5) # It doesn't need to find an optimized solution, it only needs to do a non-trivial run
                     print(mode, score)
-                    other_score = 0
+                    #other_score = 0
                     for i in range(self.n_tests):
                         with self.subTest(i=i):
                             c, _, _ = self.do_permutated_gaus(np.copy(matrices[i]), perms[i], perms[i+1])
@@ -180,8 +180,8 @@ class TestSteiner(unittest.TestCase):
                             print(c.matrix)
                             print("\n\n")
                             """
-                            other_score += c.cnot_depth()*10000+c.count_cnots()
-                            i==4 and print(other_score)
+                            #other_score += c.cnot_depth()*10000+c.count_cnots()
+                            #i==4 and print(other_score)
                             # Check if all gates are allowed
                             self.assertGates(circuits[i])  
                             # Check if the circuit is equivalent to the original matrix
