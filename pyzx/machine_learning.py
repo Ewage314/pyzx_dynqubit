@@ -17,7 +17,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import numpy as np
-
+from sortedcontainers import SortedSet
 
 def make_fitness_func(func, **func_args):
     """
@@ -40,14 +40,15 @@ class GeneticAlgorithm():
         self.crossover_prob = crossover_prob
         self.mutation_prob = mutation_prob
         self.fitness_func = fitness_func
-        self._sort = lambda l: l.sort(key=lambda x:x[1], reverse=maximize)
-        self.maximize = maximize
+        #self._sort = lambda l: l.sort(key=lambda x:x[1], reverse=maximize)
+        self.maximize = maximize # TODO adjust to work for maximization problems as well!
         self.n_qubits = 0
         self.population = None
         self.quiet=quiet
 
     def _select(self):
-        fitness_scores = [f for c,f in self.population]
+        #fitness_scores = [f for c,f in self.population]
+        fitness_scores = [f for f,c in self.population]
         total_fitness = sum(fitness_scores)
         if self.maximize:
             selection_chance = [f/total_fitness for f in fitness_scores]
@@ -60,9 +61,11 @@ class GeneticAlgorithm():
 
     def _create_population(self, n):
         self.population = [np.random.permutation(n) for _ in range(self.population_size-1)] + [np.arange(n)] # TODO remove duplicates from the population
-        self.population = [(chromosome, self.fitness_func(chromosome)) for chromosome in self.population]
+        self.population = [(self.fitness_func(chromosome), tuple(chromosome)) for chromosome in self.population]
+        #self.population = [(chromosome, self.fitness_func(chromosome)) for chromosome in self.population]
         #print(self.population[-1])
-        self._sort(self.population)
+        #self._sort(self.population)
+        self.population = SortedSet(self.population)
         #print(self.population[0])
         self.negative_population = self.population[-self.negative_population_size:]
 
@@ -85,29 +88,36 @@ class GeneticAlgorithm():
             self._update_population(n_child)
             (not self.quiet) and print("GA - Iteration", i, "best fitness:", [p for p in self.population[:5]])
         if partial_solution:
-            return self.population[0] + initial_order[n_qubits:]
-        return self.population[0][0]
+            return np.asarray(self.population[0][1] + initial_order[n_qubits:])
+            #return self.population[0][0] + initial_order[n_qubits:]
+        return np.asarray(self.population[0][1])
+        #return self.population[0][0]
 
     def _add_children(self, children):
-        n_child = len(children)
-        self.population.extend([(child, self.fitness_func(child)) for child in children if not (child.tolist() in [c[0].tolist() for c in self.population])])
-        self._sort(self.population)
-        n_child = len(self.population) - self.population_size
-        self.negative_population.extend(self.population[-n_child:])
+        for child in children:
+            self.population.add((self.fitness_func(child), tuple(child)))
+        #self.population.extend([(child, self.fitness_func(child)) for child in children if not (child.tolist() in [c[0].tolist() for c in self.population])])
+        #self._sort(self.population)
+        while len(self.population) > self.population_size:
+            self.negative_population.append(self.population.pop())
+        #n_child = len(self.population) - self.population_size
+        #self.negative_population.extend(self.population[-n_child:])
         self.negative_population = [self.negative_population[i] for i in np.random.choice(len(self.negative_population), size=self.negative_population_size, replace=False)]
-        self.population = self.population[:self.population_size]
+        #self.population = self.population[:self.population_size]
 
     def _update_population(self, n_child):
         children = []
         # Create a child from weak parents to avoid local optima
         p1, p2 = np.random.choice(self.negative_population_size, size=2, replace=False)
         #print(p1, p2, self.population_size, self.negative_population_size)
-        child = self._crossover(self.negative_population[p1][0], self.negative_population[p2][0])
+        #child = self._crossover(self.negative_population[p1][0], self.negative_population[p2][0])
+        child = self._crossover(self.negative_population[p1][1], self.negative_population[p2][1])
         children.append(child)
         for _ in range(n_child):
             if np.random.random() < self.crossover_prob:
                 p1, p2 = self._select()
-                child = self._crossover(self.population[p1][0], self.population[p2][0])
+                #child = self._crossover(self.population[p1][0], self.population[p2][0])
+                child = self._crossover(self.population[p1][1], self.population[p2][1])
                 if np.random.random() < self.mutation_prob:
                     child = self._mutate(child)
                 children.append(child)
