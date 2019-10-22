@@ -13,7 +13,7 @@ import time
 from ..linalg import Mat2
 from .architecture import create_fully_connected_architecture, create_architecture, dynamic_size_architectures
 from ..parity_maps import CNOT_tracker
-from ..machine_learning import GeneticAlgorithm
+from ..machine_learning import GeneticAlgorithm, ParticleSwarmOptimization
 from ..utils import make_into_list
 #from .steiner import steiner_gauss
 from .steiner import rec_steiner_gauss as steiner_gauss
@@ -25,10 +25,14 @@ GAUSS_MODE = "gauss"
 STEINER_MODE = "steiner"
 GENETIC_STEINER_MODE = "genetic_steiner"
 GENETIC_GAUSS_MODE = "genetic_gauss"
+PSO_GAUSS_MODE = "pso_gauss"
+PSO_STEINER_MODE = "pso_steiner"
 
 elim_modes = [STEINER_MODE, GAUSS_MODE, GENETIC_STEINER_MODE, GENETIC_GAUSS_MODE]
 genetic_elim_modes = [GENETIC_STEINER_MODE, GENETIC_GAUSS_MODE]
-no_genetic_elim_modes = [STEINER_MODE, GAUSS_MODE]
+pso_elim_modes = [PSO_GAUSS_MODE, PSO_STEINER_MODE]
+basic_elim_modes = [STEINER_MODE, GAUSS_MODE]
+elim_modes = genetic_elim_modes + pso_elim_modes + basic_elim_modes
 
 # COMPILE MODES
 QUIL_COMPILER = "quilc"
@@ -45,7 +49,7 @@ def cnot_fitness_func(mode, matrix, architecture, row=True, col=True, full_reduc
     return basic_fitness_func(metric_func, mode, matrix, architecture, row, col, full_reduce, **kwargs)
 
 def combined_fitness_func(mode, matrix, architecture, row=True, col=True, full_reduce=True, **kwargs):
-    metric_func = lambda c: c.cnot_depth()*(architecture.n_qubits**3) + c.count_cnots()
+    metric_func = lambda c: c.cnot_depth()*10000 + c.count_cnots()
     return basic_fitness_func(metric_func, mode, matrix, architecture, row, col, full_reduce, **kwargs)
 
 def basic_fitness_func(metric_func, mode, matrix, architecture, row=True, col=True, full_reduce=True, **kwargs):
@@ -115,10 +119,10 @@ def gauss(mode, matrix, architecture=None, permutation=None, **kwargs):
             architecture = create_fully_connected_architecture(len(matrix.data))
         return steiner_gauss(matrix, architecture, permutation=permutation, **kwargs)
     elif mode == GENETIC_STEINER_MODE:
-        perm, cnots, rank = permutated_gauss(matrix, STEINER_MODE, architecture=architecture, permutation=permutation, **kwargs)
+        perm, circuit, rank = permutated_gauss(matrix, STEINER_MODE, architecture=architecture, permutation=permutation, **kwargs)
         return rank
     elif mode == GENETIC_GAUSS_MODE:
-        perm, cnots, rank = permutated_gauss(matrix, GAUSS_MODE, architecture=architecture, permutation=permutation, **kwargs)
+        perm, circuit, rank = permutated_gauss(matrix, GAUSS_MODE, architecture=architecture, permutation=permutation, **kwargs)
         return rank
 
 def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, crossover_prob=0.8, mutate_prob=0.2, n_iterations=50,
@@ -131,14 +135,14 @@ def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, c
     :param crossover_prob: For the genetic algorithm
     :param mutate_prob: For the genetic algorithm
     :param n_iterations: For the genetic algorithm
-    :param row: If the rows should be permutated
+    :param row: If the rows should be permutatedA
     :param col: If the columns should be permutated
     :param full_reduce: Whether to do full gaussian reduction
     :return: Best permutation found, list of CNOTS corresponding to the elimination.
     """
     if fitness_func is None:
         fitness_func =  combined_fitness_func(mode, matrix, architecture, row=row, col=col, full_reduce=full_reduce, **kwargs)
-    optimizer = GeneticAlgorithm(population_size, crossover_prob, mutate_prob, fitness_func)
+    optimizer = GeneticAlgorithm(population_size, crossover_prob, mutate_prob, fitness_func, quiet=True)
     permsize = len(matrix.data) if row else len(matrix.data[0])
     best_permutation = optimizer.find_optimimum(permsize, n_iterations, continued=True)
 
@@ -153,7 +157,70 @@ def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, c
     circuit.row_perm = row_perm
     circuit.col_perm = col_perm
     rank = gauss(mode, mat, architecture, x=x, y=circuit, full_reduce=full_reduce, **kwargs)
-    return best_permutation, circuit.count_cnots(), rank
+    return best_permutation, circuit, rank
+
+def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, input_perm=True, output_perm=True, 
+                        swarm_size=15, n_steps=10, s_crossover=0.4, p_crossover=0.3, pso_mutation=0.2, **kwargs):
+    n_qubits = len(matrices[0].data)
+    
+    if mode in basic_elim_modes:
+        circuits = [CNOT_tracker(n_qubits) for _ in matrices]
+        permutations = [np.arange(n_qubits) for _ in range(len(matrices)+1)]
+        for i, m in enumerate(matrices):
+            gauss(mode, m, architecture=architecture, y=circuits[i], **kwargs)
+    elif mode in genetic_elim_modes:
+        row = input_perm
+        col = True
+        circuits = []
+        permutations = []
+        current_perm = np.arange(n_qubits)#[i for i in range(n_qubits)]
+        if not row:
+            permutations.append(current_perm) # Add initial permutation if it is not optimized
+        for i, m in enumerate(matrices):
+            # Adjust matrix according to current input perm.
+            m = Mat2([m.data[r] for r in current_perm])
+            if i == len(matrices) - 1:
+                col = output_perm # Last permutation is only optimized if the output qubit locations are flexible.
+            if mode == GENETIC_GAUSS_MODE:
+                new_mode = GAUSS_MODE
+            else:
+                new_mode = STEINER_MODE
+            perm, circuit, _ = permutated_gauss(m, new_mode, architecture=architecture, fitness_func=fitness_func, row=row, col=col, **kwargs)
+            circuits.append(circuit) # Store the extracted circuit
+            if row:
+                permutations.append(perm) # Add optimized inital permutation
+            permutations.append(perm) # Store the obtained permutation
+            current_perm = perm # Update the new permutation
+            row = False # Subsequent initial permutations are determined by the previous output permutation.
+    else: # pso modes
+        if mode == PSO_STEINER_MODE:
+            new_mode = GENETIC_STEINER_MODE
+        else:
+            new_mode = GENETIC_GAUSS_MODE
+        if not input_perm or not output_perm:
+            # You cannot do subsequent passes to optimize the permutation, so pso is useless.
+            return sequential_gauss(matrices, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=input_perm, output_perm=output_perm, **kwargs)
+        rev_matrices = [Mat2(np.asarray(m.data).T.tolist()) for m in reversed(matrices)] # Reverse and transpose the parity matrices to create the reversed equivalent sequence 
+        def step_func(initial_perm):
+            # Apply the original qubit placement 
+            ms = [Mat2([m.data[i] for i in initial_perm]) if j == 0 else Mat2([r for r in m.data]) for j, m in enumerate(matrices)]
+            # Optimize the sequence
+            circs, perms, score = sequential_gauss(ms, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=False, output_perm=True, **kwargs)
+            # Resulting permutation is the initial permutation of the reverse pass
+            perms[0] = initial_perm
+            ms = [Mat2([m.data[i] for i in perms[-1]]) if j == 0 else Mat2([r for r in m.data]) for j,m in enumerate(rev_matrices)] 
+            # Optimize the reverse sequences.
+            _, new_perms, _ = sequential_gauss(ms, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=False, output_perm=True, **kwargs)
+            # New initial placement is the final placement of the reverse pass.
+            #new_perms[0] = perms[-1] 
+            return new_perms[-1], (circs, perms), score
+
+        optimizer = ParticleSwarmOptimization(swarm_size=swarm_size, fitness_func=fitness_func, step_func=step_func, s_best_crossover=s_crossover, p_best_crossover=p_crossover, mutation=pso_mutation)
+        best_solution = optimizer.find_optimimum(architecture.n_qubits, n_steps, True)
+        circuits, permutations = best_solution
+        #print(permutations[:2])
+    #print([c.cnot_depth()*10000 + c.count_cnots() for c in circuits])
+    return circuits, permutations, sum([c.cnot_depth()*10000 + c.count_cnots() for c in circuits])
 
 def count_cnots_mat2(mode, matrix, compile_mode=None, architecture=None, n_compile=1, store_circuit_as=None, **kwargs):
     if compile_mode == QUIL_COMPILER:
@@ -311,7 +378,7 @@ def map_cnot_circuit(file, architecture, mode=GENETIC_STEINER_MODE, dest_file=No
     circuit = CNOT_tracker.from_qasm_file(file)
     matrix = circuit.matrix
     compiled_circuit = CNOT_tracker(circuit.n_qubits)
-    if mode in no_genetic_elim_modes:
+    if mode in basic_elim_modes:
         rank = gauss(mode, matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
     elif mode in genetic_elim_modes:
         rank = gauss(mode, matrix, architecture, full_reduce=True, y=compiled_circuit,
@@ -327,3 +394,107 @@ def map_cnot_circuit(file, architecture, mode=GENETIC_STEINER_MODE, dest_file=No
         with open(dest_file, "w") as f:
             f.write(compiled_qasm)
     return compiled_circuit
+
+def sequential_map_cnot_circuits(source, modes, architectures, n_qubits=None, populations=30, iterations=15, crossover_probs=0.8,
+                            mutation_probs=0.5, dest_folder=None, metrics_file=None, n_compile=1):
+    modes = make_into_list(modes)
+    architectures = make_into_list(architectures)
+    populations = make_into_list(populations)
+    iterations = make_into_list(iterations)
+    crossover_probs = make_into_list(crossover_probs)
+    mutation_probs = make_into_list(mutation_probs)
+
+    if os.path.isfile(source):
+        source, file = os.path.split(source)
+        files = [file]
+    else:
+        files = [f for f in os.listdir(source) if os.path.isfile(os.path.join(source, f))]
+
+    if not os.path.exists(source):
+        raise IOError("Folder does not exist: " + source)
+    if dest_folder is None:
+        dest_folder = source
+    else:
+        os.makedirs(dest_folder, exist_ok=True)
+
+    arch_iter = []
+    circuits = {}
+    metrics = []
+    for architecture in architectures:
+        if architecture in dynamic_size_architectures:
+            if n_qubits is None:
+                raise KeyError("Number of qubits not specified for architecture" + architecture)
+            else:
+                n_qubits = make_into_list(n_qubits)
+                arch_iter.extend([create_architecture(architecture, n_qubits=q) for q in n_qubits])
+        else:
+            arch_iter.append(create_architecture(architecture))
+    for architecture in arch_iter:
+        circuits[architecture.name] = {}
+        for mode in modes:
+            if mode == QUIL_COMPILER:
+                n_compile_list = range(n_compile)
+            else:
+                n_compile_list = [None]
+            new_dest_folder = os.path.join(dest_folder, architecture.name, mode)
+            os.makedirs(new_dest_folder, exist_ok=True)
+            if mode in genetic_elim_modes or mode in pso_elim_modes:
+                pop_iter = populations
+                iter_iter = iterations
+                crossover_iter = crossover_probs
+                mutation_iter = mutation_probs
+                circuits[architecture.name][mode] = {}
+            else:
+                if mode == QUIL_COMPILER:
+                    circuits[architecture.name][mode] = []
+                pop_iter = [None]
+                iter_iter = [None]
+                crossover_iter = [None]
+                mutation_iter = [None]
+
+            for population in pop_iter:
+                for iteration in iter_iter:
+                    for crossover_prob in crossover_iter:
+                        for mutation_prob in mutation_iter:
+                            matrices = []
+                            for file in files:
+                                if os.path.splitext(file)[1].lower() == ".qasm":
+                                    origin_file = os.path.join(source, file)
+                                    matrices.append(CNOT_tracker.from_qasm_file(origin_file).matrix)        
+                            for i in n_compile_list:
+                                #dest_filename = create_dest_filename(origin_file, population, iteration, crossover_prob, mutation_prob, i)
+                                #dest_file = os.path.join(dest_folder, architecture.name, mode, dest_filename)
+                                try:
+                                    start_time = time.time()
+                                    circuits, permutations, score = sequential_gauss(matrices[:5], architecture=architecture, mode=mode,
+                                                                population_size=population, n_iterations=iteration,
+                                                                crossover_prob=crossover_prob, mutate_prob=mutation_prob)
+                                    end_time = time.time()
+                                    print("score:", score)
+                                    print("time (s):", end_time-start_time)
+                                    # TODO store metrics
+                                    """
+                                    if metrics_file is not None:
+                                        metrics.append(make_metrics(circuit, origin_file, architecture.name, mode, dest_file, population, iteration, crossover_prob, mutation_prob, end_time-start_time, i))
+                                    if mode in genetic_elim_modes:
+                                        circuits[architecture.name][mode][(population, iteration, crossover_prob, mutation_prob)] = circuit
+                                    elif mode == QUIL_COMPILER:
+                                        circuits[architecture.name][mode].append(circuit)
+                                    else:
+                                        circuits[architecture.name][mode] = circuit
+                                    """
+                                except KeyError as e: # Should only happen with quilc
+                                    if mode == QUIL_COMPILER:
+                                        print("\033[31mCould not compile", origin_file, end="\033[0m\n")
+                                    else:
+                                        raise e
+
+    if len(metrics) > 0 and DataFrame is not None:
+        df = DataFrame(metrics)
+        print("Average gate count:", df["n_cnots"].mean())
+        print("Average gate depth:", df["depth"].mean())
+        if os.path.exists(metrics_file): # append to the file - do not overwrite!
+            df.to_csv(metrics_file, columns=get_metric_header(), header=False, index=False, mode='a')
+        else:
+            df.to_csv(metrics_file, columns=get_metric_header(), index=False)
+    return circuits

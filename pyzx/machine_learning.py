@@ -59,9 +59,11 @@ class GeneticAlgorithm():
         return np.random.choice(self.population_size, size=2, replace=False, p=selection_chance)
 
     def _create_population(self, n):
-        self.population = [np.random.permutation(n) for _ in range(self.population_size)] # TODO remove duplicates from the population
+        self.population = [np.random.permutation(n) for _ in range(self.population_size-1)] + [np.arange(n)] # TODO remove duplicates from the population
         self.population = [(chromosome, self.fitness_func(chromosome)) for chromosome in self.population]
+        #print(self.population[-1])
         self._sort(self.population)
+        #print(self.population[0])
         self.negative_population = self.population[-self.negative_population_size:]
 
     def find_optimimum(self, n_qubits, n_generations, initial_order=None, n_child=None, continued=False):
@@ -81,7 +83,7 @@ class GeneticAlgorithm():
             
         for i in range(n_generations):
             self._update_population(n_child)
-            (not self.quiet) and print("Iteration", i, "best fitness:", [p for p in self.population[:5]])
+            (not self.quiet) and print("GA - Iteration", i, "best fitness:", [p for p in self.population[:5]])
         if partial_solution:
             return self.population[0] + initial_order[n_qubits:]
         return self.population[0][0]
@@ -90,14 +92,16 @@ class GeneticAlgorithm():
         n_child = len(children)
         self.population.extend([(child, self.fitness_func(child)) for child in children if not (child.tolist() in [c[0].tolist() for c in self.population])])
         self._sort(self.population)
+        n_child = len(self.population) - self.population_size
         self.negative_population.extend(self.population[-n_child:])
-        self.negative_population = [self.negative_population[i] for i in np.random.choice(self.negative_population_size + n_child, size=self.negative_population_size, replace=False)]
+        self.negative_population = [self.negative_population[i] for i in np.random.choice(len(self.negative_population), size=self.negative_population_size, replace=False)]
         self.population = self.population[:self.population_size]
 
     def _update_population(self, n_child):
         children = []
         # Create a child from weak parents to avoid local optima
         p1, p2 = np.random.choice(self.negative_population_size, size=2, replace=False)
+        #print(p1, p2, self.population_size, self.negative_population_size)
         child = self._crossover(self.negative_population[p1][0], self.negative_population[p2][0])
         children.append(child)
         for _ in range(n_child):
@@ -146,13 +150,15 @@ class ParticleSwarmOptimization():
     def _create_swarm(self, n):
         self.swarm = [Particle(n, self.step_func, self.s_crossover, self.p_crossover, self.mutation, self.maximize, id=i) 
                         for i in range(self.size)]
+        # Start with 1 particle with initial permutation
+        self.swarm[0].current = np.arange(n)
 
     def find_optimimum(self, n_qubits, n_steps, quiet=True):
         self._create_swarm(n_qubits)
         self.best_particle = self.swarm[0]
         for i in range(n_steps):
             self._update_swarm()
-            (not quiet) and print("Iteration", i, "best fitness:", self.best_particle.best, self.best_particle.best_point)
+            (not quiet) and print("PSO - Iteration", i, "best fitness:", self.best_particle.best, self.best_particle.best_point)
         return self.best_particle.best_solution
 
     def _update_swarm(self):

@@ -35,7 +35,7 @@ from ..graph import Graph
 from ..simplify import teleport_reduce, interior_clifford_simp
 from ..circuit import Circuit
 from ..optimize import basic_optimization
-from ..routing.cnot_mapper import elim_modes, STEINER_MODE, QUIL_COMPILER, genetic_elim_modes, gauss, no_genetic_elim_modes, make_metrics, get_metric_header, cnot_fitness_func, GAUSS_MODE
+from ..routing.cnot_mapper import elim_modes, STEINER_MODE, QUIL_COMPILER, genetic_elim_modes, gauss, basic_elim_modes, make_metrics, get_metric_header, cnot_fitness_func, GAUSS_MODE
 from ..routing.architecture import architectures, SQUARE, dynamic_size_architectures, create_architecture
 from ..drawing import draw
 from ..utils import make_into_list, restricted_float

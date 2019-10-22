@@ -7,7 +7,7 @@ if __name__ == '__main__':
 import numpy as np
 
 from pyzx.linalg import Mat2
-from pyzx.routing.cnot_mapper import gauss, STEINER_MODE, GAUSS_MODE, cnot_fitness_func
+from pyzx.routing.cnot_mapper import gauss, STEINER_MODE, GAUSS_MODE, GENETIC_STEINER_MODE, PSO_STEINER_MODE, cnot_fitness_func, sequential_gauss
 from pyzx.routing.architecture import create_architecture, REC_ARCH, SQUARE
 from pyzx.parity_maps import CNOT_tracker, build_random_parity_map
 from pyzx.machine_learning import GeneticAlgorithm
@@ -18,7 +18,7 @@ class TestSteiner(unittest.TestCase):
 
     def setUp(self):
         self.n_qubits = 9
-        name = REC_ARCH
+        name = SQUARE
         self.n_tests = 5
         self.arch = create_architecture(name, n_qubits=self.n_qubits)
         depth = 20
@@ -153,6 +153,46 @@ class TestSteiner(unittest.TestCase):
                 optimizer = GeneticAlgorithm(population, crossover_prob, mutate_prob, cnot_fitness_func(STEINER_MODE, Mat2(self.matrix[i]), self.arch))
                 best_permutation = optimizer.find_optimimum(self.n_qubits, n_iter)
                 self.do_permutated_gaus(self.matrix[i], best_permutation, best_permutation)
+
+    def test_pso_optimization(self):
+        modes = [STEINER_MODE, GENETIC_STEINER_MODE, PSO_STEINER_MODE]
+        for p in range(self.n_tests):
+            with self.subTest(i=p):
+                order = np.random.permutation(self.n_tests)
+                matrices = [self.matrix[c] for c in order]
+                for mode in modes:
+                    circuits, perms, score = sequential_gauss([Mat2(np.copy(m)) for m in matrices], mode=mode, architecture=self.arch, full_reduce=True, 
+                                                                n_steps=5, swarm_size=5, population_size=5, n_iterations=5) # It doesn't need to find an optimized solution, it only needs to do a non-trivial run
+                    print(mode, score)
+                    other_score = 0
+                    for i in range(self.n_tests):
+                        with self.subTest(i=i):
+                            c, _, _ = self.do_permutated_gaus(np.copy(matrices[i]), perms[i], perms[i+1])
+                            """
+                            print(perms[i], perms[i+1])
+                            print(sum([1 for k in range(self.n_qubits) for j in range(self.n_qubits) if matrices[i][perms[i]][:,perms[i+1]][k][j] != circuits[i].matrix.data[k][j]]))  
+                            print(sum([1 for k in range(self.n_qubits) for j in range(self.n_qubits) if c.matrix.data[k][j] != circuits[i].matrix.data[k][j]]))  
+                            print(sum([1 for k in range(self.n_qubits) for j in range(self.n_qubits) if matrices[i][perms[i]][:,perms[i+1]][k][j] != c.matrix.data[k][j]]))  
+                            print(matrices[i])
+                            print()
+                            print(circuits[i].matrix)
+                            print()
+                            print(c.matrix)
+                            print("\n\n")
+                            """
+                            other_score += c.cnot_depth()*10000+c.count_cnots()
+                            i==4 and print(other_score)
+                            # Check if all gates are allowed
+                            self.assertGates(circuits[i])  
+                            # Check if the circuit is equivalent to the original matrix
+                            self.assertCircuitEquivalentNdArr(circuits[i], matrices[i][perms[i]][:,perms[i+1]])
+                            # Check if the circuit is equivalent to the extracted circuit given the optimized permutaitons
+                            self.assertCircuitEquivalent(circuits[i], c)
+                            # Check if their metrics are the same.
+                            self.assertEqual(circuits[i].count_cnots(), c.count_cnots())
+                            self.assertEqual(circuits[i].cnot_depth(), c.cnot_depth())
+                            
+
 
 if __name__ == '__main__':
     unittest.main()

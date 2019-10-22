@@ -108,7 +108,7 @@ def steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, permu
     return rank
 
 
-def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, permutation=None):
+def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, permutation=None, **kwargs):
     """
     Performs Gaussian elimination that is constraint bij the given architecture
     
