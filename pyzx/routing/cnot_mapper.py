@@ -40,17 +40,22 @@ NO_COMPILER = "not_compiled"
 
 compiler_modes = [QUIL_COMPILER, NO_COMPILER]
 
+COMBINED_METRIC = "combined"
+DEPTH_METRIC = "depth"
+COUNT_METRIC = "count"
+metrics = [COMBINED_METRIC, DEPTH_METRIC, COUNT_METRIC]
+
 def depth_fitness_func(mode, matrix, architecture, row=True, col=True, full_reduce=True, **kwargs):
     metric_func = lambda c: c.cnot_depth()
-    return basic_fitness_func(metric_func, mode, matrix, architecture, row, col, full_reduce, **kwargs)
+    return basic_fitness_func(DEPTH_METRIC, mode, matrix, architecture, row, col, full_reduce, **kwargs)
 
 def cnot_fitness_func(mode, matrix, architecture, row=True, col=True, full_reduce=True, **kwargs):
     metric_func = lambda c: c.count_cnots()
-    return basic_fitness_func(metric_func, mode, matrix, architecture, row, col, full_reduce, **kwargs)
+    return basic_fitness_func(COUNT_METRIC, mode, matrix, architecture, row, col, full_reduce, **kwargs)
 
 def combined_fitness_func(mode, matrix, architecture, row=True, col=True, full_reduce=True, **kwargs):
     metric_func = lambda c: c.cnot_depth()*10000 + c.count_cnots()
-    return basic_fitness_func(metric_func, mode, matrix, architecture, row, col, full_reduce, **kwargs)
+    return basic_fitness_func(COMBINED_METRIC, mode, matrix, architecture, row, col, full_reduce, **kwargs)
 
 def basic_fitness_func(metric_func, mode, matrix, architecture, row=True, col=True, full_reduce=True, **kwargs):
     """
@@ -64,17 +69,83 @@ def basic_fitness_func(metric_func, mode, matrix, architecture, row=True, col=Tr
     :param full_reduce: Whether to fully reduce the matrix, thus rebuild the full circuit.
     :return: A fitness function that calculates the number of gates needed for a given permutation.
     """
-    n_qubits = len(matrix.data)
+    #n_qubits = len(matrix.data)
 
-    def fitness_func(permutation):
-        row_perm = permutation if row else np.arange(len(matrix.data))
-        col_perm = permutation if col else np.arange(len(matrix.data[0]))
-        circuit = CNOT_tracker(n_qubits)
-        mat = Mat2([[matrix.data[r][c] for c in col_perm] for r in row_perm])
-        gauss(mode, mat, architecture=architecture, y=circuit, full_reduce=full_reduce, **kwargs)
-        return metric_func(circuit)
-
+    #def fitness_func(permutation):
+    #    row_perm = permutation if row else np.arange(len(matrix.data))
+    #    col_perm = permutation if col else np.arange(len(matrix.data[0]))
+    #    circuit = CNOT_tracker(n_qubits)
+    #    mat = Mat2([[matrix.data[r][c] for c in col_perm] for r in row_perm])
+    #    gauss(mode, mat, architecture=architecture, y=circuit, full_reduce=full_reduce, **kwargs)
+    #    return metric_func(circuit)
+    fitness_func = FitnessFunction(metric_func, matrix, mode, architecture, row=row, col=col, full_reduce=full_reduce, **kwargs)
     return fitness_func
+
+class FitnessFunction(object):
+
+    def __init__(self, metric, matrix, mode, architecture, row=True, col=True, full_reduce=True, **kwargs):
+        self.metric = metric
+        self.matrix = matrix
+        self.mode = mode
+        self.architecture = architecture
+        self.row = row
+        self.col = col
+        self.full_reduce = full_reduce
+        self.n_qubits = architecture.n_qubits
+        self.kwargs = kwargs
+    
+    def _make_function(self):
+        if self.metric == COMBINED_METRIC:
+            f = lambda c: c.cnot_depth()*10000 + c.count_cnots()
+        elif self.metric == COUNT_METRIC:
+            f = lambda c: c.count_cnots()
+        elif self.metric == DEPTH_METRIC:
+            f = lambda c: c.cnot_depth()
+        
+        def fitness_func(permutation):
+            row_perm = permutation if self.row else np.arange(len(self.matrix.data))
+            col_perm = permutation if self.col else np.arange(len(self.matrix.data[0]))
+            circuit = CNOT_tracker(self.n_qubits)
+            mat = Mat2([[self.matrix.data[r][c] for c in col_perm] for r in row_perm])
+            gauss(self.mode, mat, architecture=self.architecture, y=circuit, full_reduce=self.full_reduce, **self.kwargs)
+            return f(circuit)
+        return fitness_func
+
+    def __call__(self, permutation):
+        f = self._make_function()
+        return f(permutation)
+        
+class StepFunction():
+
+    def __init__(self, matrices, mode, architecture, fitness_func, **kwargs):
+        self.matrices=matrices
+        self.mode = mode
+        self.architecture = architecture
+        self.fitness_func = fitness_func
+        self.kwargs = kwargs
+        self.rev_matrices = [Mat2(np.asarray(m.data).T.tolist()) for m in reversed(matrices)] # Reverse and transpose the parity matrices to create the reversed equivalent sequence 
+        
+
+    def __call__(self, initial_perm):
+        matrices=self.matrices
+        new_mode = self.mode
+        architecture = self.architecture
+        fitness_func = self.fitness_func
+        rev_matrices = self.rev_matrices
+        kwargs = self.kwargs
+        # Apply the original qubit placement 
+        ms = [Mat2([m.data[i] for i in initial_perm]) if j == 0 else Mat2([r for r in m.data]) for j, m in enumerate(matrices)]
+        # Optimize the sequence
+        circs, perms, score = sequential_gauss(ms, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=False, output_perm=True, n_threads=1, **kwargs)
+        # Resulting permutation is the initial permutation of the reverse pass
+        perms[0] = initial_perm
+        ms = [Mat2([m.data[i] for i in perms[-1]]) if j == 0 else Mat2([r for r in m.data]) for j,m in enumerate(rev_matrices)] 
+        # Optimize the reverse sequences.
+        _, new_perms, _ = sequential_gauss(ms, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=False, output_perm=True, n_threads=1, **kwargs)
+        # New initial placement is the final placement of the reverse pass.
+        #new_perms[0] = perms[-1] 
+        return new_perms[-1], (circs, perms), score
+
 
 def gauss(mode, matrix, architecture=None, permutation=None, **kwargs):
     """
@@ -125,8 +196,8 @@ def gauss(mode, matrix, architecture=None, permutation=None, **kwargs):
         perm, circuit, rank = permutated_gauss(matrix, GAUSS_MODE, architecture=architecture, permutation=permutation, **kwargs)
         return rank
 
-def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, crossover_prob=0.8, mutate_prob=0.2, n_iterations=50,
-                     row=True, col=True, full_reduce=True, fitness_func=None, x=None, y=None, **kwargs):
+def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, crossover_prob=0.8, mutate_prob=0.2, n_iterations=5,
+                     row=True, col=True, full_reduce=True, fitness_func=None, x=None, y=None, n_threads=None, **kwargs):
     """
     Finds an optimal permutation of the matrix to reduce the number of CNOT gates.
     
@@ -142,7 +213,7 @@ def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, c
     """
     if fitness_func is None:
         fitness_func =  combined_fitness_func(mode, matrix, architecture, row=row, col=col, full_reduce=full_reduce, **kwargs)
-    optimizer = GeneticAlgorithm(population_size, crossover_prob, mutate_prob, fitness_func, quiet=True)
+    optimizer = GeneticAlgorithm(population_size, crossover_prob, mutate_prob, fitness_func, quiet=True, n_threads=n_threads)
     permsize = len(matrix.data) if row else len(matrix.data[0])
     best_permutation = optimizer.find_optimimum(permsize, n_iterations, continued=True)
 
@@ -160,7 +231,7 @@ def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, c
     return best_permutation, circuit, rank
 
 def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, input_perm=True, output_perm=True, 
-                        swarm_size=15, n_steps=10, s_crossover=0.4, p_crossover=0.3, pso_mutation=0.2, **kwargs):
+                        swarm_size=15, n_steps=5, s_crossover=0.4, p_crossover=0.3, pso_mutation=0.2, n_threads=None, **kwargs):
     n_qubits = len(matrices[0].data)
     
     if mode in basic_elim_modes:
@@ -185,7 +256,7 @@ def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, 
                 new_mode = GAUSS_MODE
             else:
                 new_mode = STEINER_MODE
-            perm, circuit, _ = permutated_gauss(m, new_mode, architecture=architecture, fitness_func=fitness_func, row=row, col=col, **kwargs)
+            perm, circuit, _ = permutated_gauss(m, new_mode, architecture=architecture, fitness_func=fitness_func, row=row, col=col, n_threads=n_threads, **kwargs)
             circuits.append(circuit) # Store the extracted circuit
             if row:
                 permutations.append(perm) # Add optimized inital permutation
@@ -199,27 +270,15 @@ def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, 
             new_mode = GENETIC_GAUSS_MODE
         if not input_perm or not output_perm:
             # You cannot do subsequent passes to optimize the permutation, so pso is useless.
-            return sequential_gauss(matrices, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=input_perm, output_perm=output_perm, **kwargs)
-        rev_matrices = [Mat2(np.asarray(m.data).T.tolist()) for m in reversed(matrices)] # Reverse and transpose the parity matrices to create the reversed equivalent sequence 
-        def step_func(initial_perm):
-            # Apply the original qubit placement 
-            ms = [Mat2([m.data[i] for i in initial_perm]) if j == 0 else Mat2([r for r in m.data]) for j, m in enumerate(matrices)]
-            # Optimize the sequence
-            circs, perms, score = sequential_gauss(ms, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=False, output_perm=True, **kwargs)
-            # Resulting permutation is the initial permutation of the reverse pass
-            perms[0] = initial_perm
-            ms = [Mat2([m.data[i] for i in perms[-1]]) if j == 0 else Mat2([r for r in m.data]) for j,m in enumerate(rev_matrices)] 
-            # Optimize the reverse sequences.
-            _, new_perms, _ = sequential_gauss(ms, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=False, output_perm=True, **kwargs)
-            # New initial placement is the final placement of the reverse pass.
-            #new_perms[0] = perms[-1] 
-            return new_perms[-1], (circs, perms), score
-
+            return sequential_gauss(matrices, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=input_perm, output_perm=output_perm, n_threads=n_threads, **kwargs)
+        
+        step_func = StepFunction(matrices, new_mode, architecture, fitness_func, **kwargs)
         optimizer = ParticleSwarmOptimization(swarm_size=swarm_size, fitness_func=fitness_func, step_func=step_func, s_best_crossover=s_crossover, p_best_crossover=p_crossover, mutation=pso_mutation)
-        best_solution = optimizer.find_optimimum(architecture.n_qubits, n_steps, True)
+        best_solution = optimizer.find_optimimum(architecture.n_qubits, n_steps, False)
         circuits, permutations = best_solution
         #print(permutations[:2])
-    #print([c.cnot_depth()*10000 + c.count_cnots() for c in circuits])
+        #print([c.cnot_depth()*10000 + c.count_cnots() for c in circuits])
+        print(permutations)
     return circuits, permutations, sum([c.cnot_depth()*10000 + c.count_cnots() for c in circuits])
 
 def count_cnots_mat2(mode, matrix, compile_mode=None, architecture=None, n_compile=1, store_circuit_as=None, **kwargs):
@@ -465,8 +524,9 @@ def sequential_map_cnot_circuits(source, modes, architectures, n_qubits=None, po
                                 #dest_filename = create_dest_filename(origin_file, population, iteration, crossover_prob, mutation_prob, i)
                                 #dest_file = os.path.join(dest_folder, architecture.name, mode, dest_filename)
                                 try:
+                                    print("Sequence length", len(matrices))
                                     start_time = time.time()
-                                    circuits, permutations, score = sequential_gauss(matrices[:5], architecture=architecture, mode=mode,
+                                    circuits, permutations, score = sequential_gauss(matrices, architecture=architecture, mode=mode,
                                                                 population_size=population, n_iterations=iteration,
                                                                 crossover_prob=crossover_prob, mutate_prob=mutation_prob)
                                     end_time = time.time()

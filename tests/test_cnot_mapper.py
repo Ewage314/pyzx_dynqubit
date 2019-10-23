@@ -162,7 +162,7 @@ class TestSteiner(unittest.TestCase):
                 matrices = [self.matrix[c] for c in order]
                 for mode in modes:
                     circuits, perms, score = sequential_gauss([Mat2(np.copy(m)) for m in matrices], mode=mode, architecture=self.arch, full_reduce=True, 
-                                                                n_steps=5, swarm_size=5, population_size=5, n_iterations=5) # It doesn't need to find an optimized solution, it only needs to do a non-trivial run
+                                                                n_steps=5, swarm_size=10, population_size=5, n_iterations=5) # It doesn't need to find an optimized solution, it only needs to do a non-trivial run
                     print(mode, score)
                     #other_score = 0
                     for i in range(self.n_tests):
