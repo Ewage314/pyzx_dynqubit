@@ -101,7 +101,7 @@ class GeneticAlgorithm():
         #print(self.population[0])
         self.negative_population = self.population[-self.negative_population_size:]
 
-    def find_optimimum(self, n_qubits, n_generations, initial_order=None, n_child=None, continued=False):
+    def find_optimimum(self, n_qubits, n_generations, initial_order=None, n_child=None, continued=False, close_pool=True):
         self.n_qubits = n_qubits
         partial_solution = False
         if not continued or self.population is None:
@@ -122,6 +122,9 @@ class GeneticAlgorithm():
         if partial_solution:
             return np.asarray(self.population[0][1] + initial_order[n_qubits:])
             #return self.population[0][0] + initial_order[n_qubits:]
+        if close_pool and self.pool:
+            self.pool.close()
+            self.pool.join()
         return np.asarray(self.population[0][1])
         #return self.population[0][0]
 
@@ -222,12 +225,15 @@ class ParticleSwarmOptimization():
         # Start with 1 particle with initial permutation
         self.swarm[0].current = np.arange(n)
 
-    def find_optimimum(self, n_qubits, n_steps, quiet=True):
+    def find_optimimum(self, n_qubits, n_steps, quiet=True, close_pool=True):
         self._create_swarm(n_qubits)
         self.best_particle = self.swarm[0]
         for i in range(n_steps):
             self._update_swarm()
             (not quiet) and print("PSO - Iteration", i, "best fitness:", self.best_particle.best, self.best_particle.best_point)
+        if close_pool and self.pool:
+            self.pool.close()
+            self.pool.join()
         return self.best_particle.best_solution
 
     def _update_swarm(self):
