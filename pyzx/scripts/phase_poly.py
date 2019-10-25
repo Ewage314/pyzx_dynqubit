@@ -96,15 +96,18 @@ class PhasePoly():
         self.phases = phase_dict
 
     @staticmethod
-    def fromCircuit(circuit):
+    def fromCircuit(circuit, qubit_placement=None):
         phases = {}
-        current_parities = [x for x in range(circuit.n_qubits)]
+        current_parities = [[1 if j==i else 0 for j in range(circuit.qubits)] for i in range(circuit.n_qubits)]
+        if qubit_placement is not None:
+            current_parities = [current_parities[i] for i in qubit_placement]
         gate_rotations = {"T": Fraction(1,4), "P":Fraction(1,2), "Z":Fraction(1,1), "T_T": Fraction(1,4)*-1, "P_T": Fraction(1,2)*-1}
         for gate in circuit.gates():
             if gate.name == "CNOT":
                 # Update current_parities
-                #TODO
-                pass
+                control = current_parities[gate.control]
+                target = current_parities[gate.target]
+                current_parities[target] = [(i+j)%2 for i,j in zip(control, target)]
             elif gate.name in gate_rotations.keys():
                 # Add the T rotation to the phases
                 parity = current_parities[gate.target]
@@ -118,7 +121,7 @@ class PhasePoly():
             if new_phase > 1:
                 return new_phase -2
             return new_phase
-        phases = {par:clamp(r) for par, r in phases.items()}
+        phases = {par:clamp(r) for par, r in phases.items() if clamp(r) != 0}
         return PhasePoly(phases)
 
     def partition(self):
@@ -209,16 +212,16 @@ class PhasePoly():
 def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwargs):
     n_qubits = architecture.n_qubits
     current_perm = [i for i in range(n_qubits)]
-    initial_perm = None
+    initial_perm = current_perm
     c = Circuit(n_qubits)
     final_circuit = Circuit(n_qubits)
     for gate in circuit.gates():
         if gate.name == "HAD":
             # Deal with the phase polynomial that came before
-            phase_poly = PhasePoly.fromCircuit(c)
+            phase_poly = PhasePoly.fromCircuit(c, qubit_placement=current_perm)
             new_circ, in_perm, out_perm = phase_poly.synthesize(mode, architecture, input_perm=input_perm, output_perm=output_perm, **kwargs)
             # Store the initial permutation
-            if initial_perm is None:
+            if input_perm:
                 initial_perm = in_perm
                 input_perm = False
             # Copy the synthesized circuit
