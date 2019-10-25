@@ -29,7 +29,7 @@ from ..routing.cnot_mapper import STEINER_MODE, QUIL_COMPILER, sequential_map_cn
 from ..routing.cnot_mapper import sequential_gauss
 from ..utils import make_into_list, restricted_float
 from ..graph.graph import  Graph
-from ..circuit import Circuit, ZPhase, Fraction
+from ..circuit import Circuit, ZPhase, Fraction, HAD
 
 description = "Compiles given qasm files or those in the given folder to a given architecture."
 
@@ -108,10 +108,11 @@ class PhasePoly():
             elif gate.name in gate_rotations.keys():
                 # Add the T rotation to the phases
                 parity = current_parities[gate.target]
+                adj = -1 if hasattr(gate, "adjoint") and gate.adjoint else 1
                 if parity in phases:
-                    phases[parity] += gate_rotations[gate.name]
+                    phases[parity] += gate_rotations[gate.name]*adj
                 else: 
-                    phases[parity] = gate_rotations[gate.name]
+                    phases[parity] = gate_rotations[gate.name]*adj
         def clamp(phase):
             new_phase = phase%2
             if new_phase > 1:
@@ -203,5 +204,41 @@ class PhasePoly():
                 phase = self.phases[parity]
                 gate = ZPhase(target=target, phase=phase)
                 circuit.add_gate(gate)
-        return circuit
+        return circuit, perms[0], perms[-1]
 
+def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwargs):
+    n_qubits = architecture.n_qubits
+    current_perm = [i for i in range(n_qubits)]
+    initial_perm = None
+    c = Circuit(n_qubits)
+    final_circuit = Circuit(n_qubits)
+    for gate in circuit.gates():
+        if gate.name == "HAD":
+            # Deal with the phase polynomial that came before
+            phase_poly = PhasePoly.fromCircuit(c)
+            new_circ, in_perm, out_perm = phase_poly.synthesize(mode, architecture, input_perm=input_perm, output_perm=output_perm, **kwargs)
+            # Store the initial permutation
+            if initial_perm is None:
+                initial_perm = in_perm
+                input_perm = False
+            # Copy the synthesized circuit
+            for g in new_circ.gates():
+                final_circuit.add_gate(g)
+            # Add the hadamard gate
+            g = HAD(current_perm[gate.target])
+            final_circuit.add_gate(g)
+            # Update new permutation
+            current_perm = out_perm
+            # Start a new circuit
+            c = Circuit(n_qubits)
+        else:
+            c.add_gate(gate)
+    phase_poly = PhasePoly.fromCircuit(c)
+    new_circ, in_perm, out_perm = phase_poly.synthesize(mode, architecture, input_perm=input_perm, output_perm=output_perm, **kwargs)
+    # Store the initial permutation
+    if initial_perm is None:
+        initial_perm = in_perm
+    # Copy the synthesized circuit
+    for g in new_circ.gates():
+        final_circuit.add_gate(g)
+    return final_circuit, initial_perm, out_perm
