@@ -20,13 +20,16 @@ import sys, os
 import time
 
 if __name__ == '__main__':
-    print("Please call this as python -m pyzx mapper ...")
+    print("Please call this as python -m pyzx phasepoly ...")
     exit()
 
 from ..linalg import Mat2
 from ..routing.architecture import architectures, SQUARE
 from ..routing.cnot_mapper import STEINER_MODE, QUIL_COMPILER, sequential_map_cnot_circuits, elim_modes, compiler_modes
+from ..routing.cnot_mapper import sequential_gauss
 from ..utils import make_into_list, restricted_float
+from ..graph.graph import  Graph
+from ..circuit import Circuit, ZPhase, Fraction
 
 description = "Compiles given qasm files or those in the given folder to a given architecture."
 
@@ -86,4 +89,119 @@ def main(args):
                                            crossover_probs=args.crossover_prob, mutation_probs=args.mutation_prob,
                                            dest_folder=args.destination, metrics_file=args.metrics_csv, n_compile=args.n_compile)
         all_circuits.extend(circuits)
+
+class PhasePoly():
+
+    def __init__(self, phase_dict):
+        self.phases = phase_dict
+
+    @staticmethod
+    def fromCircuit(circuit):
+        phases = {}
+        current_parities = [x for x in range(circuit.n_qubits)]
+        gate_rotations = {"T": Fraction(1,4), "P":Fraction(1,2), "Z":Fraction(1,1), "T_T": Fraction(1,4)*-1, "P_T": Fraction(1,2)*-1}
+        for gate in circuit.gates():
+            if gate.name == "CNOT":
+                # Update current_parities
+                #TODO
+                pass
+            elif gate.name in gate_rotations.keys():
+                # Add the T rotation to the phases
+                parity = current_parities[gate.target]
+                if parity in phases:
+                    phases[parity] += gate_rotations[gate.name]
+                else: 
+                    phases[parity] = gate_rotations[gate.name]
+        def clamp(phase):
+            new_phase = phase%2
+            if new_phase > 1:
+                return new_phase -2
+            return new_phase
+        phases = {par:clamp(r) for par, r in phases.items()}
+        return PhasePoly(phases)
+
+    def partition(self):
+        # Matroid partitioning based on wikipedia: https://en.wikipedia.org/wiki/Matroid_partitioning
+        def add_edge(graph, vs_dict, node1, node2):
+            graph.nedges += 1
+            graph.graph[vs_dict[node1]][vs_dict[node2]] = 1
+
+        partitions = []
+        for parity in self.phases.keys():
+            graph = Graph()
+            # Add current parity to the graph
+            # Add each partition to the graph
+            # Add each parity in the partition to the graph
+            vs = graph.add_vertices(len(partitions)+sum([len(p) for p in partitions])+1)
+            vs_dict = {node:i for i,node in zip(vs, partitions+[e for p in partitions for e in p]+[parity])}
+            # Check which parities can be added to another partition
+            for partition in partitions:
+                # Check if the new parity can be added to the partition
+                if self._independent(partition + [parity]):
+                    add_edge(graph, vs_dict, parity, partition)
+                for p in partition:
+                    # Check if p can be replaced with the new parity in the partition
+                    for partition2 in partitions:
+                        if partition2 != partition:
+                            for p2 in partition2:
+                                # Check if p2 can be replaced with p in their partitions
+                                new_partition = [e for e in partition if e != p] + [p2]
+                                if self._independent(new_partition):
+                                    add_edge(graph, vs_dict, p2, p)
+            # Find a path from the parity to a parition
+            path = self._dfs([parity, [parity]], graph, vs_dict, {v:k for k,v in vs_dict.items()}, partitions)
+            if path != []:
+                # Apply those changes if such a path exists
+                # Remember which partition to add the final element to
+                p_idx = partitions.index(path[-1]) # Last element in the path is always a partition
+                for p1, p2 in zip(path[:-1], path[1:]):
+                    # Replace p2 with p1 in p1's partition
+                    for partition in partitions:
+                        if p1 in partition:
+                            partition.pop(p1)
+                            partition.add(p2)
+                partitions[p_idx].add(path[-2])
+            else:
+                # Make a new partition if no such path exists.
+                partitions.append(set(parity))
+        return partitions
+    
+    def _dfs(self, nodes, graph, vs_dict, inv_vs_dict, partitions):
+        # recursive dfs to find the shortest path
+        if nodes == []:
+            return []
+        new_nodes = []
+        for node, path in nodes:
+            # For each node2 connected to node
+            for node2 in graph.graph[vs_dict[node]].keys():
+                # If it's a partition, we found a path
+                next_node = inv_vs_dict[node2]
+                if next_node not in path: # Avoid loops!
+                    new_path = path + [next_node]
+                    if next_node in partitions:
+                        return new_path
+                    else:
+                        new_nodes.append((next_node, new_path))
+        return self._dfs(new_nodes, graph, vs_dict, inv_vs_dict, partitions)
+
+    def _independent(self, partition):
+        m = Mat2([p for p in partition])
+        rank = m.gauss(full_reduce=True, blocksize=3)
+        return rank == len(partition)
+
+    def synthesize(self, mode, architecture, **kwargs):
+        partitions = self.partition()
+        parities = [[parity for parity in partition] for partition in partitions]
+        matrices = [Mat2(partition) for partition in parities]
+        CNOT_circuits, perms, _ = sequential_gauss(matrices, mode=mode, architecture=architecture, **kwargs)
+        circuit = Circuit(architecture.n_qubits)
+        for i, partition in enumerate(parities):
+            for gate in CNOT_circuits[i].gates:
+                circuit.add_gate(gate)
+            for target, parity in enumerate(partition):
+                target = perms[i+1].index(target)
+                phase = self.phases[parity]
+                gate = ZPhase(target=target, phase=phase)
+                circuit.add_gate(gate)
+        return circuit
 
