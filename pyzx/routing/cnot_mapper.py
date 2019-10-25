@@ -234,7 +234,7 @@ def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, 
                         swarm_size=15, n_steps=5, s_crossover=0.4, p_crossover=0.3, pso_mutation=0.2, n_threads=None, **kwargs):
     n_qubits = len(matrices[0].data)
     
-    if mode in basic_elim_modes:
+    if mode in basic_elim_modes or mode is None:
         circuits = [CNOT_tracker(n_qubits) for _ in matrices]
         permutations = [np.arange(n_qubits) for _ in range(len(matrices)+1)]
         for i, m in enumerate(matrices):
