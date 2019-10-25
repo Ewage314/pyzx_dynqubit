@@ -144,7 +144,7 @@ class PhasePoly():
             graph.graph[v1][v2] = 1
 
         partitions = []
-        for parity in set(list(self.xphases.keys()) + list(self.zphases.keys())):
+        for parity in self.all_parities:
             print("Inserting", parity, partitions)
             graph = Graph()
             # Add current parity to the graph
@@ -168,6 +168,7 @@ class PhasePoly():
                                     add_edge(graph, vs_dict, p2, p)
             # Find a path from the parity to a parition
             path = self._dfs([(parity, [parity])], graph, vs_dict, partitions)
+            print("path:",path)
             if path != []:
                 # Apply those changes if such a path exists
                 # Remember which partition to add the final element to
@@ -214,6 +215,7 @@ class PhasePoly():
         parities = [[[int(v) for v in parity] for parity in partition] for partition in partitions]
         matrices = [Mat2(partition) for partition in parities]
         print(matrices)
+        # TODO adjust the matrices to be the right one...
         CNOT_circuits, perms, _ = sequential_gauss(matrices, mode=mode, architecture=architecture, **kwargs)
         circuit = Circuit(n_qubits)
         for i, partition in enumerate(partitions):
