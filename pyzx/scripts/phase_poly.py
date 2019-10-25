@@ -29,7 +29,7 @@ from ..routing.cnot_mapper import STEINER_MODE, QUIL_COMPILER, sequential_map_cn
 from ..routing.cnot_mapper import sequential_gauss
 from ..utils import make_into_list, restricted_float
 from ..graph.graph import  Graph
-from ..circuit import Circuit, ZPhase, Fraction, HAD
+from ..circuit import Circuit, ZPhase, Fraction, HAD, XPhase
 
 description = "Compiles given qasm files or those in the given folder to a given architecture."
 
@@ -92,37 +92,45 @@ def main(args):
 
 class PhasePoly():
 
-    def __init__(self, phase_dict):
-        self.phases = phase_dict
+    def __init__(self, zphase_dict, xphase_dict):
+        self.zphases = zphase_dict
+        self.xphases = xphase_dict
 
     @staticmethod
     def fromCircuit(circuit, qubit_placement=None):
-        phases = {}
+        zphases = {}
+        xphases = {}
         current_parities = [[1 if j==i else 0 for j in range(circuit.qubits)] for i in range(circuit.n_qubits)]
         if qubit_placement is not None:
             current_parities = [current_parities[i] for i in qubit_placement]
-        gate_rotations = {"T": Fraction(1,4), "P":Fraction(1,2), "Z":Fraction(1,1), "T_T": Fraction(1,4)*-1, "P_T": Fraction(1,2)*-1}
         for gate in circuit.gates():
-            if gate.name == "CNOT":
+            parity = current_parities[gate.target]
+            if gate.name in ["CNOT", "CX"]:
                 # Update current_parities
                 control = current_parities[gate.control]
-                target = current_parities[gate.target]
-                current_parities[target] = [(i+j)%2 for i,j in zip(control, target)]
-            elif gate.name in gate_rotations.keys():
+                current_parities[parity] = [(i+j)%2 for i,j in zip(control, parity)]
+            elif isinstance(gate, ZPhase):
                 # Add the T rotation to the phases
-                parity = current_parities[gate.target]
-                adj = -1 if hasattr(gate, "adjoint") and gate.adjoint else 1
-                if parity in phases:
-                    phases[parity] += gate_rotations[gate.name]*adj
+                if parity in zphases:
+                    zphases[parity] += gate.phase
                 else: 
-                    phases[parity] = gate_rotations[gate.name]*adj
+                    zphases[parity] = gate.phase
+            elif isinstance(gate, XPhase):
+                parity = current_parities[gate.target]
+                if parity in xphases:
+                    xphases[parity] += gate.phase
+                else: 
+                    xphases[parity] = gate.phase
+            else:
+                print("Gate not supported!", gate.name)
         def clamp(phase):
             new_phase = phase%2
             if new_phase > 1:
                 return new_phase -2
             return new_phase
-        phases = {par:clamp(r) for par, r in phases.items() if clamp(r) != 0}
-        return PhasePoly(phases)
+        zphases = {par:clamp(r) for par, r in zphases.items() if clamp(r) != 0}
+        xphases = {par:clamp(r) for par, r in xphases.items() if clamp(r) != 0}
+        return PhasePoly(zphases, xphases)
 
     def partition(self):
         # Matroid partitioning based on wikipedia: https://en.wikipedia.org/wiki/Matroid_partitioning
@@ -131,7 +139,7 @@ class PhasePoly():
             graph.graph[vs_dict[node1]][vs_dict[node2]] = 1
 
         partitions = []
-        for parity in self.phases.keys():
+        for parity in set(list(self.xphases.keys()) + list(self.zphases.keys())):
             graph = Graph()
             # Add current parity to the graph
             # Add each partition to the graph
@@ -204,8 +212,12 @@ class PhasePoly():
                 circuit.add_gate(gate)
             for target, parity in enumerate(partition):
                 target = perms[i+1].index(target)
-                phase = self.phases[parity]
-                gate = ZPhase(target=target, phase=phase)
+                if parity in self.zphases.keys(): 
+                    phase = self.zphases[parity]
+                    gate = ZPhase(target=target, phase=phase)
+                if parity in self.xphases.keys():
+                    phase = self.xphases[parity]
+                    gate = XPhase(target=target, phase=phase)
                 circuit.add_gate(gate)
         return circuit, perms[0], perms[-1]
 
