@@ -217,50 +217,40 @@ class PhasePoly():
         parities = [[[int(v) for v in parity] for parity in partition] for partition in partitions]
         # Make the parity sets into matrices
         matrices = [Mat2([p for p in partition]) for partition in parities]
-             
+        # The matrices to be computed need to first undo the previous parities and then obtain the new parities
         other_matrices = []
         prev_matrix = Mat2([[1 if i==j else 0 for j in range(n_qubits)] for i in range(n_qubits)])
         for m in matrices:
             new_matrix, inverse = inverse_hack(m)
             other_matrices.append(new_matrix*prev_matrix) 
             prev_matrix = inverse
-        CNOT_circuits, perms, _ = sequential_gauss([m.copy() for m in other_matrices], mode=mode, architecture=architecture, input_perm=False, **kwargs)
+        CNOT_circuits, perms, _ = sequential_gauss([m.copy() for m in other_matrices], mode=mode, architecture=architecture, **kwargs)
         
         zphases = list(self.zphases.keys())
         xphases = list(self.xphases.keys())
         circuit = Circuit(n_qubits)
-        current_parities = Mat2.id(n_qubits)
-        prev_perm = [i for i in range(n_qubits)]
-        for i, partition in enumerate(partitions):
+        # Keep track of the parities
+        current_parities = Mat2([[Mat2.id(n_qubits).data[i][perms[0].tolist().index(j)] for j in range(n_qubits)] for i in range(n_qubits)])
+        for c in CNOT_circuits:
             # Obtain the specified parity
-            #current_parities = Mat2([current_parities.data[i] for i in perms[i]])
-            for gate in CNOT_circuits[i].gates:
+            for gate in c.gates:
                 # CNOTs have been mapped already, do not need to be adjusted!
                 circuit.add_gate(gate)
                 current_parities.row_add(gate.control, gate.target)
-            #current_parities.data = [[row[i] for i in perms[i+1]] for row in current_parities.data]
-            if i < 2:
-                prev_perm = list(perms[0])
-            else:
-                prev_perm = [prev_perm.index(j) for j in range(n_qubits)]
-                prev_perm = [prev_perm.index(j) for j in perms[i]]
-            #current_parities = Mat2([[current_parities.data[k][l] for l in perms[i+1]] for k in prev_perm])
             # Place the rotations at each parity
-            #for target, parity in enumerate(partition):
             for target, p in enumerate(current_parities.data):
-                if True:
-                    parity = "".join([str(v) for v in p])
-                    #target = original_permutation[perms[i+1]][target]#.tolist().index(target)
-                    if parity in zphases: 
-                        phase = self.zphases[parity]
-                        gate = ZPhase(target=target, phase=phase)
-                        zphases.remove(parity)
-                        circuit.add_gate(gate)
-                    if parity in xphases:
-                        phase = self.xphases[parity]
-                        gate = XPhase(target=target, phase=phase)
-                        xphases.remove(parity)
-                        circuit.add_gate(gate)
+                parity = "".join([str(v) for v in p])
+                # Apply the phases at current parity if needed.
+                if parity in zphases: 
+                    phase = self.zphases[parity]
+                    gate = ZPhase(target=target, phase=phase)
+                    zphases.remove(parity)
+                    circuit.add_gate(gate)
+                if parity in xphases:
+                    phase = self.xphases[parity]
+                    gate = XPhase(target=target, phase=phase)
+                    xphases.remove(parity)
+                    circuit.add_gate(gate)
         return circuit, perms[0], perms[-1]
 
 def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwargs):
@@ -296,7 +286,7 @@ def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwarg
     if initial_perm is None:
         initial_perm = in_perm
     # Copy the synthesized circuit
-    for g in new_circ.gates():
+    for g in new_circ.gates:
         final_circuit.add_gate(g)
     return final_circuit, initial_perm, out_perm
 
