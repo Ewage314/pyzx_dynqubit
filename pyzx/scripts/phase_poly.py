@@ -29,7 +29,7 @@ from ..routing.cnot_mapper import STEINER_MODE, QUIL_COMPILER, sequential_map_cn
 from ..routing.cnot_mapper import sequential_gauss
 from ..utils import make_into_list, restricted_float
 from ..graph.graph import  Graph
-from ..circuit import Circuit, ZPhase, Fraction, HAD, XPhase
+from ..circuit import Circuit, ZPhase, Fraction, HAD, XPhase, CNOT
 
 description = "Compiles given qasm files or those in the given folder to a given architecture."
 
@@ -96,16 +96,15 @@ class PhasePoly():
         self.zphases = zphase_dict
         self.xphases = xphase_dict
         self.out_par = out_parities
-        self.all_parities = set(list(zphase_dict.keys()) + list(self.xphases.keys())+ out_parities)
+        self.all_parities = set(list(zphase_dict.keys()) + list(self.xphases.keys()))#+ out_parities)
 
     @staticmethod
-    def fromCircuit(circuit, qubit_placement=None):
+    def fromCircuit(circuit, initial_qubit_placement=None, final_qubit_placement=None):
         zphases = {}
         xphases = {}
         current_parities = ["".join(["1" if j==i else "0" for j in range(circuit.qubits)]) for i in range(circuit.qubits)]
-        print(current_parities)
-        if qubit_placement is not None:
-            current_parities = [current_parities[i] for i in qubit_placement]
+        if initial_qubit_placement is not None:
+            current_parities = [current_parities[i] for i in initial_qubit_placement]
         for gate in circuit.gates:
             parity = current_parities[gate.target]
             if gate.name in ["CNOT", "CX"]:
@@ -133,6 +132,8 @@ class PhasePoly():
             return new_phase
         zphases = {par:clamp(r) for par, r in zphases.items() if clamp(r) != 0}
         xphases = {par:clamp(r) for par, r in xphases.items() if clamp(r) != 0}
+        if final_qubit_placement is not None:
+            current_parities = ["".join([ parity[i] for i in final_qubit_placement]) for parity in current_parities]
         return PhasePoly(zphases, xphases, current_parities)
 
     def partition(self):
@@ -145,7 +146,6 @@ class PhasePoly():
 
         partitions = []
         for parity in self.all_parities:
-            print("Inserting", parity, partitions)
             graph = Graph()
             # Add current parity to the graph
             # Add each partition to the graph
@@ -168,7 +168,6 @@ class PhasePoly():
                                     add_edge(graph, vs_dict, p2, p)
             # Find a path from the parity to a parition
             path = self._dfs([(parity, [parity])], graph, vs_dict, partitions)
-            print("path:",path)
             if path != []:
                 # Apply those changes if such a path exists
                 # Remember which partition to add the final element to
@@ -178,11 +177,14 @@ class PhasePoly():
                     for partition in partitions:
                         if p1 in partition:
                             partition.pop(p1)
-                            partition.add(p2)
-                partitions[p_idx].add(path[-2])
+                            #partition.add(p2)
+                            partition.append(p2)
+                partitions[p_idx].append(path[-2])
+                #partitions[p_idx].add(path[-2])
             else:
                 # Make a new partition if no such path exists.
-                partitions.append(set([parity]))
+                partitions.append([parity])
+        # TODO - find an optimal ordering of the partitions for synthesis
         return partitions
     
     def _dfs(self, nodes, graph, inv_vs_dict, partitions):
@@ -206,30 +208,59 @@ class PhasePoly():
 
     def _independent(self, partition):
         m = Mat2([[int(v) for v in p] for p in partition])
-        rank = m.gauss(full_reduce=True, blocksize=3)
-        return rank == len(partition)
+        return inverse_hack(m) is not None
 
     def synthesize(self, mode, architecture, **kwargs):
         n_qubits = architecture.n_qubits if architecture is not None else len(self.out_par)
+        # Partition the parities
         partitions = self.partition()+[self.out_par]
         parities = [[[int(v) for v in parity] for parity in partition] for partition in partitions]
-        matrices = [Mat2(partition) for partition in parities]
-        print(matrices)
-        # TODO adjust the matrices to be the right one...
-        CNOT_circuits, perms, _ = sequential_gauss(matrices, mode=mode, architecture=architecture, **kwargs)
+        # Make the parity sets into matrices
+        matrices = [Mat2([p for p in partition]) for partition in parities]
+             
+        other_matrices = []
+        prev_matrix = Mat2([[1 if i==j else 0 for j in range(n_qubits)] for i in range(n_qubits)])
+        for m in matrices:
+            new_matrix, inverse = inverse_hack(m)
+            other_matrices.append(new_matrix*prev_matrix) 
+            prev_matrix = inverse
+        CNOT_circuits, perms, _ = sequential_gauss([m.copy() for m in other_matrices], mode=mode, architecture=architecture, input_perm=False, **kwargs)
+        
+        zphases = list(self.zphases.keys())
+        xphases = list(self.xphases.keys())
         circuit = Circuit(n_qubits)
+        current_parities = Mat2.id(n_qubits)
+        prev_perm = [i for i in range(n_qubits)]
         for i, partition in enumerate(partitions):
+            # Obtain the specified parity
+            #current_parities = Mat2([current_parities.data[i] for i in perms[i]])
             for gate in CNOT_circuits[i].gates:
+                # CNOTs have been mapped already, do not need to be adjusted!
                 circuit.add_gate(gate)
-            for target, parity in enumerate(partition):
-                target = list(perms[i+1]).index(target)
-                if parity in self.zphases.keys(): 
-                    phase = self.zphases[parity]
-                    gate = ZPhase(target=target, phase=phase)
-                if parity in self.xphases.keys():
-                    phase = self.xphases[parity]
-                    gate = XPhase(target=target, phase=phase)
-                circuit.add_gate(gate)
+                current_parities.row_add(gate.control, gate.target)
+            #current_parities.data = [[row[i] for i in perms[i+1]] for row in current_parities.data]
+            if i < 2:
+                prev_perm = list(perms[0])
+            else:
+                prev_perm = [prev_perm.index(j) for j in range(n_qubits)]
+                prev_perm = [prev_perm.index(j) for j in perms[i]]
+            #current_parities = Mat2([[current_parities.data[k][l] for l in perms[i+1]] for k in prev_perm])
+            # Place the rotations at each parity
+            #for target, parity in enumerate(partition):
+            for target, p in enumerate(current_parities.data):
+                if True:
+                    parity = "".join([str(v) for v in p])
+                    #target = original_permutation[perms[i+1]][target]#.tolist().index(target)
+                    if parity in zphases: 
+                        phase = self.zphases[parity]
+                        gate = ZPhase(target=target, phase=phase)
+                        zphases.remove(parity)
+                        circuit.add_gate(gate)
+                    if parity in xphases:
+                        phase = self.xphases[parity]
+                        gate = XPhase(target=target, phase=phase)
+                        xphases.remove(parity)
+                        circuit.add_gate(gate)
         return circuit, perms[0], perms[-1]
 
 def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwargs):
@@ -241,7 +272,7 @@ def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwarg
     for gate in circuit.gates:
         if gate.name == "HAD":
             # Deal with the phase polynomial that came before
-            phase_poly = PhasePoly.fromCircuit(c, qubit_placement=current_perm)
+            phase_poly = PhasePoly.fromCircuit(c, initial_qubit_placement=current_perm)
             new_circ, in_perm, out_perm = phase_poly.synthesize(mode, architecture, input_perm=input_perm, output_perm=output_perm, **kwargs)
             # Store the initial permutation
             if input_perm:
@@ -268,3 +299,24 @@ def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwarg
     for g in new_circ.gates():
         final_circuit.add_gate(g)
     return final_circuit, initial_perm, out_perm
+
+def inverse_hack(matrix):
+    m = matrix.copy()
+    if matrix.rows() != matrix.cols(): 
+        # Compute which columns are independent from the matrix
+        rank = m.gauss(full_reduce=False)
+        cols = []
+        row = 0
+        for col in range(m.cols()):
+            if row >= m.rows() or m.data[row][col] == 0 :
+                cols.append(col)
+            else:
+                row += 1
+        # Add those columns as rows to the matrix
+        matrix = Mat2(matrix.data + [[1 if c==i else 0 for i in range(m.cols())] for c in cols])
+        m = matrix.copy()
+    # Compute the inverse
+    inv = Mat2.id(matrix.rows())
+    rank = m.gauss(x=inv, full_reduce=True)
+    if rank < matrix.rows(): return None
+    else: return matrix, inv

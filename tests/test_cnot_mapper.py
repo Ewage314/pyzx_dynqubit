@@ -11,6 +11,8 @@ from pyzx.routing.cnot_mapper import gauss, STEINER_MODE, GAUSS_MODE, GENETIC_ST
 from pyzx.routing.architecture import create_architecture, REC_ARCH, SQUARE
 from pyzx.parity_maps import CNOT_tracker, build_random_parity_map
 from pyzx.machine_learning import GeneticAlgorithm
+from pyzx.circuit import CNOT
+from pyzx.extract import permutation_as_swaps
 
 SEED = 42
 
@@ -18,13 +20,17 @@ class TestSteiner(unittest.TestCase):
 
     def setUp(self):
         self.n_qubits = 9
-        name = SQUARE
+        name = "line"
         self.n_tests = 5
         self.arch = create_architecture(name, n_qubits=self.n_qubits)
         depth = 20
         self.circuit = [CNOT_tracker(self.arch.n_qubits) for _ in range(self.n_tests)]
         np.random.seed(SEED)
         self.matrix = [build_random_parity_map(self.n_qubits, depth, self.circuit[i]) for i in range(self.n_tests)]
+        self.aggr_circ = CNOT_tracker(self.arch.n_qubits)
+        for c in self.circuit:
+            for g in c.gates:
+                self.aggr_circ.add_gate(g)
 
     def assertGates(self, circuit):
         for gate in circuit.gates:
@@ -155,19 +161,54 @@ class TestSteiner(unittest.TestCase):
                 self.do_permutated_gaus(self.matrix[i], best_permutation, best_permutation)
 
     def test_pso_optimization(self):
-        modes = [STEINER_MODE, GENETIC_STEINER_MODE, PSO_STEINER_MODE]
+        modes = [STEINER_MODE, GENETIC_STEINER_MODE]#, PSO_STEINER_MODE]
         for p in range(self.n_tests):
             with self.subTest(i=p):
-                order = np.random.permutation(self.n_tests)
+                order = np.random.permutation(self.n_tests)[:p+1]
                 matrices = [self.matrix[c] for c in order]
+                aggr_circ = CNOT_tracker(self.arch.n_qubits)
+                for c in [self.circuit[i] for i in order]:
+                    for g in c.gates:
+                        aggr_circ.add_gate(g)
                 for mode in modes:
+                    permute_input = False
+                    permute_output = True
                     circuits, perms, score = sequential_gauss([Mat2(np.copy(m)) for m in matrices], mode=mode, architecture=self.arch, full_reduce=True, 
-                                                                n_steps=5, swarm_size=10, population_size=5, n_iterations=5) # It doesn't need to find an optimized solution, it only needs to do a non-trivial run
+                                                                n_steps=5, swarm_size=10, population_size=5, n_iterations=5, input_perm=permute_input, output_perm=permute_output) # It doesn't need to find an optimized solution, it only needs to do a non-trivial run
                     print(mode, score)
-                    #other_score = 0
-                    for i in range(self.n_tests):
-                        with self.subTest(i=i):
-                            c, _, _ = self.do_permutated_gaus(np.copy(matrices[i]), perms[i], perms[i+1])
+                    if not permute_input:
+                        self.assertListEqual(perms[0].tolist(), [i for i in range(self.n_qubits)])
+                    if not permute_output:
+                        self.assertListEqual(perms[-1].tolist(), [i for i in range(self.n_qubits)])
+                    aggr_c = CNOT_tracker(self.n_qubits)
+                    aggr_c2 = CNOT_tracker(self.n_qubits)
+                    # Undo the initial permutation
+                    for q1, q2 in permutation_as_swaps({v:k for k,v in enumerate(perms[0])}):
+                        aggr_c2.add_gate(CNOT(q1, q2))
+                        aggr_c2.add_gate(CNOT(q2, q1))
+                        aggr_c2.add_gate(CNOT(q1, q2))
+                    for circ in circuits:
+                        for gate in circ.gates:
+                            aggr_c.add_gate(gate)
+                    for circ in [self.circuit[i] for i in order]:
+                        for gate in circ.gates:
+                            aggr_c2.add_gate(gate)
+                    #print(aggr_c2.matrix)
+                    #print(p)
+                    # Undo the initial permutation
+                    for q1, q2 in permutation_as_swaps({v:k for k,v in enumerate(perms[-1])}):
+                        aggr_c2.add_gate(CNOT(q1, q2))
+                        aggr_c2.add_gate(CNOT(q2, q1))
+                        aggr_c2.add_gate(CNOT(q1, q2))
+                    #if mode == GENETIC_STEINER_MODE:
+                    #    print(aggr_c2.matrix)
+                    #    print(perms[-1])
+                    #    print(aggr_c.matrix)
+                    #    print(all([aggr_c2.matrix.data[i][j] == aggr_c.matrix.data[i][j] for i in range(self.n_qubits) for j in range(self.n_qubits)]))
+                    #    input("test")
+                    self.assertCircuitEquivalent(aggr_c2, aggr_c)
+                    for i in range(p):
+                        with self.subTest(i=(i, mode)):
                             """
                             print(perms[i], perms[i+1])
                             print(sum([1 for k in range(self.n_qubits) for j in range(self.n_qubits) if matrices[i][perms[i]][:,perms[i+1]][k][j] != circuits[i].matrix.data[k][j]]))  
@@ -185,8 +226,9 @@ class TestSteiner(unittest.TestCase):
                             # Check if all gates are allowed
                             self.assertGates(circuits[i])  
                             # Check if the circuit is equivalent to the original matrix
-                            self.assertCircuitEquivalentNdArr(circuits[i], matrices[i][perms[i]][:,perms[i+1]])
+                            self.assertCircuitEquivalentNdArr(circuits[i], matrices[i][perms[i+1]][:,perms[i]])
                             # Check if the circuit is equivalent to the extracted circuit given the optimized permutaitons
+                            c, _, _ = self.do_permutated_gaus(np.copy(matrices[i]), perms[i+1], perms[i])
                             self.assertCircuitEquivalent(circuits[i], c)
                             # Check if their metrics are the same.
                             self.assertEqual(circuits[i].count_cnots(), c.count_cnots())

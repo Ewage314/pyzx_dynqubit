@@ -134,12 +134,12 @@ class StepFunction():
         rev_matrices = self.rev_matrices
         kwargs = self.kwargs
         # Apply the original qubit placement 
-        ms = [Mat2([m.data[i] for i in initial_perm]) if j == 0 else Mat2([r for r in m.data]) for j, m in enumerate(matrices)]
+        ms = [Mat2([[row[i] for i in initial_perm] for row in m.data]) if j == 0 else Mat2([r for r in m.data]) for j, m in enumerate(matrices)]
         # Optimize the sequence
         circs, perms, score = sequential_gauss(ms, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=False, output_perm=True, n_threads=1, **kwargs)
         # Resulting permutation is the initial permutation of the reverse pass
         perms[0] = initial_perm
-        ms = [Mat2([m.data[i] for i in perms[-1]]) if j == 0 else Mat2([r for r in m.data]) for j,m in enumerate(rev_matrices)] 
+        ms = [Mat2([[row[i] for i in perms[-1]] for row in m.data]) if j == 0 else Mat2([r for r in m.data]) for j,m in enumerate(rev_matrices)] 
         # Optimize the reverse sequences.
         _, new_perms, _ = sequential_gauss(ms, new_mode, architecture=architecture, fitness_func=fitness_func, input_perm=False, output_perm=True, n_threads=1, **kwargs)
         # New initial placement is the final placement of the reverse pass.
@@ -164,7 +164,7 @@ def gauss(mode, matrix, architecture=None, permutation=None, **kwargs):
             #print("\033[91m Warning: Permutation parameter with Gauss-Jordan elimination is not yet supported, it can be optimized with permutated_gauss(). \033[0m ")
             #return matrix.gauss(**kwargs)
             # Broken code that tries to implement this.
-            matrix = Mat2([matrix.data[i] for i in permutation])
+            matrix = Mat2([[row[i] for i in permutation] for row in matrix.data])
             old_x, old_y = None, None
             if "x" in kwargs:
                 old_x = kwargs["x"]
@@ -176,8 +176,8 @@ def gauss(mode, matrix, architecture=None, permutation=None, **kwargs):
             kwargs["y"] = None
             rank = matrix.gauss(**kwargs)
             for gate in x.gates:
-                c = permutation[gate.control]
-                t = permutation[gate.target]
+                #c = permutation[gate.control]
+                #t = permutation[gate.target]
                 if old_x != None: old_x.row_add(c, t)
                 if old_y != None: old_y.col_add(t, c)
             return rank
@@ -211,11 +211,14 @@ def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, c
     :param full_reduce: Whether to do full gaussian reduction
     :return: Best permutation found, list of CNOTS corresponding to the elimination.
     """
-    if fitness_func is None:
-        fitness_func =  combined_fitness_func(mode, matrix, architecture, row=row, col=col, full_reduce=full_reduce, **kwargs)
-    optimizer = GeneticAlgorithm(population_size, crossover_prob, mutate_prob, fitness_func, quiet=True, n_threads=n_threads)
-    permsize = len(matrix.data) if row else len(matrix.data[0])
-    best_permutation = optimizer.find_optimimum(permsize, n_iterations, continued=True)
+    if row or col:
+        if fitness_func is None:
+            fitness_func =  combined_fitness_func(mode, matrix, architecture, row=row, col=col, full_reduce=full_reduce, **kwargs)
+        optimizer = GeneticAlgorithm(population_size, crossover_prob, mutate_prob, fitness_func, quiet=True, n_threads=n_threads)
+        permsize = len(matrix.data) if row else len(matrix.data[0])
+        best_permutation = optimizer.find_optimimum(permsize, n_iterations, continued=True)
+    else:
+        best_permutation = np.arange(len(matrix.data))
 
     n_qubits=len(matrix.data)
     row_perm = best_permutation if row else np.arange(len(matrix.data))
@@ -240,29 +243,46 @@ def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, 
         for i, m in enumerate(matrices):
             gauss(mode, m, architecture=architecture, y=circuits[i], **kwargs)
     elif mode in genetic_elim_modes:
-        row = input_perm
-        col = True
+        col = input_perm
+        if mode == GENETIC_GAUSS_MODE:
+            new_mode = GAUSS_MODE
+        else:
+            new_mode = STEINER_MODE
+        row = True
         circuits = []
         permutations = []
         current_perm = np.arange(n_qubits)#[i for i in range(n_qubits)]
-        if not row:
+        if not col:
+            prev_perm = current_perm
             permutations.append(current_perm) # Add initial permutation if it is not optimized
         for i, m in enumerate(matrices):
             # Adjust matrix according to current input perm.
-            m = Mat2([m.data[r] for r in current_perm])
+            m = Mat2([[row[r] for r in current_perm] for row in m.data])
             if i == len(matrices) - 1:
-                col = output_perm # Last permutation is only optimized if the output qubit locations are flexible.
-            if mode == GENETIC_GAUSS_MODE:
-                new_mode = GAUSS_MODE
-            else:
-                new_mode = STEINER_MODE
+                row = output_perm # Last permutation is only optimized if the output qubit locations are flexible.
+                if not row:
+                    # Undo the last permutation
+                    m = Mat2([m.data[current_perm[i]] for i in range(n_qubits)])
             perm, circuit, _ = permutated_gauss(m, new_mode, architecture=architecture, fitness_func=fitness_func, row=row, col=col, n_threads=n_threads, **kwargs)
+            if not col and not row:
+                perm = current_perm
             circuits.append(circuit) # Store the extracted circuit
-            if row:
-                permutations.append(perm) # Add optimized inital permutation
-            permutations.append(perm) # Store the obtained permutation
-            current_perm = perm # Update the new permutation
-            row = False # Subsequent initial permutations are determined by the previous output permutation.
+            if i < 1:
+                prev_perm = perm
+            else:
+                #prev_perm = [prev_perm.tolist().index(j) for j in range(n_qubits)]
+                #prev_perm = [prev_perm.tolist().index(j) for j in perm]
+                #prev_perm = np.asarray(prev_perm)
+                #prev_perm = prev_perm[perm]
+                prev_perm = perm
+                #prev_perm = prev_perm[[perm.tolist().index(j) for j in range(n_qubits)]] 
+            # Update the new permutation
+            current_perm = prev_perm
+            if col:
+                permutations.append(current_perm) # Add optimized inital permutation
+            permutations.append(current_perm) # Store the obtained permutation
+            col = False # Subsequent initial permutations are determined by the previous output permutation.
+        #input("current perm - should be [0..] ")
     else: # pso modes
         if mode == PSO_STEINER_MODE:
             new_mode = GENETIC_STEINER_MODE
@@ -276,9 +296,6 @@ def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, 
         optimizer = ParticleSwarmOptimization(swarm_size=swarm_size, fitness_func=fitness_func, step_func=step_func, s_best_crossover=s_crossover, p_best_crossover=p_crossover, mutation=pso_mutation)
         best_solution = optimizer.find_optimimum(architecture.n_qubits, n_steps, False)
         circuits, permutations = best_solution
-        #print(permutations[:2])
-        #print([c.cnot_depth()*10000 + c.count_cnots() for c in circuits])
-        print(permutations)
     return circuits, permutations, sum([c.cnot_depth()*10000 + c.count_cnots() for c in circuits])
 
 def count_cnots_mat2(mode, matrix, compile_mode=None, architecture=None, n_compile=1, store_circuit_as=None, **kwargs):

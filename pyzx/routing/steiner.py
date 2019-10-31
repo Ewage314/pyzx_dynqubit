@@ -37,12 +37,12 @@ def steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, permu
     if permutation is None:
         permutation = [i for i in range(len(matrix.data))]
     else:
-        matrix = Mat2([matrix.data[i] for i in permutation])
+        matrix = Mat2([[row[i] for i in permutation] for row in matrix.data])
     #print(matrix)
     def row_add(c0, c1):
         matrix.row_add(c0, c1)
-        c0 = permutation[c0]
-        c1 = permutation[c1]
+        #c0 = permutation[c0]
+        #c1 = permutation[c1]
         debug and print("Reducing", c0, c1)
         if x != None: x.row_add(c0, c1)
         if y != None: y.col_add(c1, c0)
@@ -122,12 +122,12 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
     if permutation is None:
         permutation = [i for i in range(len(matrix.data))]
     else:
-        matrix = Mat2([matrix.data[i] for i in permutation])
+        matrix = Mat2([[row[i] for i in permutation] for row in matrix.data])
     #print(matrix)
     def row_add(c0, c1):
         matrix.row_add(c0, c1)
-        c0 = permutation[c0]
-        c1 = permutation[c1]
+        #c0 = permutation[c0]
+        #c1 = permutation[c1]
         debug and print("Reducing", c0, c1)
         if x != None: x.row_add(c0, c1)
         if y != None: y.col_add(c1, c0)

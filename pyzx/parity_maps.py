@@ -18,7 +18,7 @@
 
 import sys
 from pyzx.generate import cnots as generate_cnots
-from pyzx.circuit import Circuit, gate_types
+from pyzx.circuit import Circuit, gate_types, CNOT
 from pyzx.linalg import Mat2
 
 import numpy as np
@@ -50,6 +50,11 @@ class CNOT_tracker(Circuit):
     def row_add(self, q0, q1):
         self.add_gate("CNOT", q0, q1)
         self.matrix.row_add(q0, q1)
+
+    def add_gate(self, gate, *args, **kwargs):
+        if isinstance(gate, CNOT):
+            self.row_add(gate.control, gate.target)
+        super().add_gate(gate, *args, **kwargs)
 
     def col_add(self, q0, q1):
         self.prepend_gate("CNOT", q1, q0)
