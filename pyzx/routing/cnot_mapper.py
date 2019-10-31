@@ -253,33 +253,22 @@ def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, 
         permutations = []
         current_perm = np.arange(n_qubits)#[i for i in range(n_qubits)]
         if not col:
-            prev_perm = current_perm
             permutations.append(current_perm) # Add initial permutation if it is not optimized
         for i, m in enumerate(matrices):
             # Adjust matrix according to current input perm.
             m = Mat2([[row[r] for r in current_perm] for row in m.data])
             if i == len(matrices) - 1:
                 row = output_perm # Last permutation is only optimized if the output qubit locations are flexible.
-                if not row:
-                    # Undo the last permutation
-                    m = Mat2([m.data[current_perm[i]] for i in range(n_qubits)])
             perm, circuit, _ = permutated_gauss(m, new_mode, architecture=architecture, fitness_func=fitness_func, row=row, col=col, n_threads=n_threads, **kwargs)
-            if not col and not row:
-                perm = current_perm
+            #if not col and not row:
+            #    perm = current_perm
             circuits.append(circuit) # Store the extracted circuit
-            if i < 1:
-                prev_perm = perm
-            else:
-                #prev_perm = [prev_perm.tolist().index(j) for j in range(n_qubits)]
-                #prev_perm = [prev_perm.tolist().index(j) for j in perm]
-                #prev_perm = np.asarray(prev_perm)
-                #prev_perm = prev_perm[perm]
-                prev_perm = perm
-                #prev_perm = prev_perm[[perm.tolist().index(j) for j in range(n_qubits)]] 
             # Update the new permutation
-            current_perm = prev_perm
+            current_perm = perm
             if col:
                 permutations.append(current_perm) # Add optimized inital permutation
+                if not row:
+                    current_perm = np.arange(n_qubits)
             permutations.append(current_perm) # Store the obtained permutation
             col = False # Subsequent initial permutations are determined by the previous output permutation.
         #input("current perm - should be [0..] ")
