@@ -26,24 +26,26 @@ if __name__ == '__main__':
     exit()
 
 from pytket.pyzx import pyzx_to_tk
-from pytket._routing import route, Architecture
+from pytket._routing import route, Architecture, graph_placement
+from pytket._transform import Transform
 from pytket import OpType
 
 from ..linalg import Mat2
 from ..routing.architecture import architectures, SQUARE, create_architecture, dynamic_size_architectures
-from ..routing.cnot_mapper import STEINER_MODE, TKET_COMPILER, sequential_map_cnot_circuits, elim_modes, compiler_modes, GENETIC_STEINER_MODE, PSO_STEINER_MODE
+from ..routing.cnot_mapper import STEINER_MODE, TKET_COMPILER, sequential_map_cnot_circuits, elim_modes, compiler_modes, GENETIC_STEINER_MODE, PSO_STEINER_MODE, GAUSS_MODE
 from ..routing.cnot_mapper import sequential_gauss
 from ..utils import make_into_list, restricted_float
 from ..graph.graph import  Graph
 from ..circuit import Circuit, ZPhase, Fraction, HAD, XPhase, CNOT
 from ..parity_maps import build_random_parity_map, CNOT_tracker
+TKET_STEINER_MODE = "tket-steiner"
 
 description = "Compiles given qasm files or those in the given folder to a given architecture."
 
 import argparse
 parser = argparse.ArgumentParser(prog="pyzx phase poly", description=description)
 #parser.add_argument("QASM_source", nargs='+', help="The QASM file or folder with QASM files to be routed.")
-parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=[TKET_COMPILER, "all"])
+parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=[TKET_COMPILER, STEINER_MODE, TKET_STEINER_MODE])
 parser.add_argument("-a", "--architecture", nargs='+', dest="architecture", default=SQUARE, choices=architectures, help="Which architecture it should run compile to.")
 parser.add_argument("-q", "--qubits", nargs='+', default=None, type=int, help="The number of qubits for the fully connected architecture.")
 #parser.add_argument("-f", "--full_reduce", dest="full_reduce", default=1, type=int, choices=[0,1], help="Full reduce")
@@ -104,8 +106,11 @@ def main(args):
         for architecture in archs:
             for n_phase_layers in make_into_list(args.phase_layers):
                 for n_cnots_per_layer in make_into_list(args.cnots):
+                    print(n_cnots_per_layer, n_phase_layers)
                     for n_circuits in make_into_list(args.n):
                         circuits = [make_random_phase_poly(architecture.n_qubits, n_phase_layers, n_cnots_per_layer, return_circuit=True) for _ in range(n_circuits)]
+                        print(circuits[1])
+                        print(get_metrics(circuits[1]))
                         results_df = map_phase_poly_circuits(circuits, architecture, mode)
                         results_df["# phase layers"] = n_phase_layers
                         results_df["# cnots per layer"] = n_cnots_per_layer
@@ -123,29 +128,35 @@ def map_phase_poly_circuits(circuits, architecture, modes, **kwargs):
     all_results = []
     for mode in modes:
         for i, circuit in enumerate(circuits):
+            #print("start", i, mode)
             if mode == TKET_COMPILER:
-                results = route_tket(circuit, architecture)
+                results = route_tket(circuit.copy(), architecture)
             else:
-                results = route_phase_poly(circuit, architecture)
+                results = route_phase_poly(circuit.copy(), architecture, mode)
             results["idx"] = i
             results["mode"] = mode
             all_results.append(results)
+            #print("done", i)
     results_df = concat(all_results)
     results_df.set_index(["idx", "mode"], inplace=True)
     return results_df.mean(level="mode")
         
-def route_phase_poly(circuit, architecture):
+def route_phase_poly(circuit, architecture, mode):
     phase_poly = PhasePoly.fromCircuit(circuit)
-    new_circuit = phase_poly.synthesize(STEINER_MODE, architecture, n_steps=5, population=5)[0]
+    new_circuit = phase_poly.synthesize(mode, architecture, n_steps=5, population=5)[0]
     return get_metrics(new_circuit)
 
 def route_tket(circuit, architecture):
     tk_circuit = pyzx_to_tk(circuit)
-    coupling_graph = [e for e in architecture.graph.edges()]
-    arch = Architecture(coupling_graph)
+    arch = get_tk_architecture(architecture)
     outcirc = route(tk_circuit, arch)
-    outcirc.decompose_SWAP_to_CX()
-    return get_metrics(tk_circuit)
+    Transform.DecomposeSWAPtoCX().apply(outcirc)
+    #outcirc.decompose_SWAP_to_CX()
+    return get_metrics(outcirc)
+
+def get_tk_architecture(architecture):
+    coupling_graph = [e for e in architecture.graph.edges()]
+    return Architecture(coupling_graph)
 
 def get_metrics(circuit):
     if isinstance(circuit, Circuit):
@@ -178,6 +189,7 @@ class PhasePoly():
         self.zphases = zphase_dict
         self.xphases = xphase_dict
         self.out_par = out_parities
+        self.n_qubits = len(out_parities[0])
         self.all_parities = set(list(zphase_dict.keys()) + list(self.xphases.keys()))#+ out_parities)
 
     @staticmethod
@@ -267,6 +279,22 @@ class PhasePoly():
                 # Make a new partition if no such path exists.
                 partitions.append([parity])
         # TODO - find an optimal ordering of the partitions for synthesis
+        ordered_partitions = []
+        for partition in partitions:
+            new_partition = [None]*self.n_qubits
+            for parity in partition:
+                if parity.count("1") == 1:
+                    new_partition[parity.index("1")] = parity
+            i = 0
+            for parity in partition:
+                if parity.count("1") != 1:
+                    while new_partition[i] is not None:
+                        i += 1
+                    new_partition[i] = parity
+            while None in new_partition:
+                new_partition.remove(None)
+            ordered_partitions.append(new_partition)
+        return ordered_partitions
         return partitions
     
     def _dfs(self, nodes, graph, inv_vs_dict, partitions):
@@ -306,8 +334,45 @@ class PhasePoly():
             new_matrix, inverse = inverse_hack(m)
             other_matrices.append(new_matrix*prev_matrix) 
             prev_matrix = inverse
-        CNOT_circuits, perms, _ = sequential_gauss([m.copy() for m in other_matrices], mode=mode, architecture=architecture, **kwargs)
-        
+        if mode == TKET_STEINER_MODE:
+            temp_CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in other_matrices], mode=GAUSS_MODE, architecture=architecture)
+            perms = []
+            # TODO - this can be made more memory/time efficient by doing it in reverse.
+            arch = get_tk_architecture(architecture)
+            perm = np.arange(n_qubits)
+            for i in range(len(temp_CNOT_circuits)):
+                # Make the partial circuit
+                circuit = Circuit(n_qubits)
+                for c in temp_CNOT_circuits[i:]:
+                    for g in c.gates:
+                        target = perm[g.target] 
+                        if isinstance(g, CNOT):
+                            #print(g)
+                            control = perm[g.control]
+                            circuit.add_gate(g.name, control, target)
+                        else:
+                            circuit.add_gate(g.name, target)
+                tk_circuit = pyzx_to_tk(circuit)
+                perm = graph_placement(tk_circuit, arch)
+                perm_dict = {p[1].index[0]: p[0].index[0] for p in perm.items()}
+                #print(perm_dict)
+                perm2 = np.asarray([perm_dict[i] if i in perm_dict else None for i in range(n_qubits)])
+                #print(perm2)
+                perm_idx  = [i for i in range(n_qubits) if perm2[i] is None]
+                perm_val = [i for i in range(n_qubits) if i not in perm2]
+                perm2[perm_idx] = perm_val
+                #print(perm2)
+                #exit(42)
+                perm = perm2
+                perms.append(perm2)
+            perms.append(perms[-1]) # Add the intitial permutation of the last CNOT block as final permutation of the full circuit
+            # Rotate all matrices accordingly
+            new_matrices = []
+            for i, input_perm, output_perm in zip(range(len(temp_CNOT_circuits)), perms, perms[1:]):
+                new_matrices.append(Mat2([[other_matrices[i].data[k][l] for l in input_perm] for k in output_perm]))
+            CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in new_matrices], mode=STEINER_MODE, architecture=architecture, **kwargs)
+        else:
+            CNOT_circuits, perms, _ = sequential_gauss([m.copy() for m in other_matrices], mode=mode, architecture=architecture, **kwargs)
         zphases = list(self.zphases.keys())
         xphases = list(self.xphases.keys())
         circuit = Circuit(n_qubits)
