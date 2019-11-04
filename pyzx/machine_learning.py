@@ -60,7 +60,7 @@ class GeneticAlgorithm():
         self.quiet=quiet
         n_threads = min(n_threads, cpu_count()) if n_threads is not None else cpu_count()
         if n_threads > 1: 
-            print("GA CPUs:", n_threads)
+            #print("GA CPUs:", n_threads)
             self.pool = Pool(n_threads)
         else:
             self.pool = None
@@ -201,7 +201,7 @@ class ParticleSwarmOptimization():
         self.maximize = maximize
         n_threads = min(n_threads, cpu_count()) if n_threads is not None else cpu_count()
         if n_threads > 1: 
-            print("PSO CPUs:", n_threads)
+            #print("PSO CPUs:", n_threads)
             self.pool = Pool(n_threads)
         else:
             self.pool = None

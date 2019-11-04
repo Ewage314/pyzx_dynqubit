@@ -18,37 +18,48 @@
 
 import sys, os
 import time
+import numpy as np
+from pandas import DataFrame, concat
 
 if __name__ == '__main__':
     print("Please call this as python -m pyzx phasepoly ...")
     exit()
 
+from pytket.pyzx import pyzx_to_tk
+from pytket._routing import route, Architecture
+from pytket import OpType
+
 from ..linalg import Mat2
-from ..routing.architecture import architectures, SQUARE
-from ..routing.cnot_mapper import STEINER_MODE, QUIL_COMPILER, sequential_map_cnot_circuits, elim_modes, compiler_modes
+from ..routing.architecture import architectures, SQUARE, create_architecture, dynamic_size_architectures
+from ..routing.cnot_mapper import STEINER_MODE, TKET_COMPILER, sequential_map_cnot_circuits, elim_modes, compiler_modes, GENETIC_STEINER_MODE, PSO_STEINER_MODE
 from ..routing.cnot_mapper import sequential_gauss
 from ..utils import make_into_list, restricted_float
 from ..graph.graph import  Graph
 from ..circuit import Circuit, ZPhase, Fraction, HAD, XPhase, CNOT
+from ..parity_maps import build_random_parity_map, CNOT_tracker
 
 description = "Compiles given qasm files or those in the given folder to a given architecture."
 
 import argparse
 parser = argparse.ArgumentParser(prog="pyzx phase poly", description=description)
-parser.add_argument("QASM_source", nargs='+', help="The QASM file or folder with QASM files to be routed.")
-parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=elim_modes+[QUIL_COMPILER, "all"])
+#parser.add_argument("QASM_source", nargs='+', help="The QASM file or folder with QASM files to be routed.")
+parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=[TKET_COMPILER, "all"])
 parser.add_argument("-a", "--architecture", nargs='+', dest="architecture", default=SQUARE, choices=architectures, help="Which architecture it should run compile to.")
 parser.add_argument("-q", "--qubits", nargs='+', default=None, type=int, help="The number of qubits for the fully connected architecture.")
 #parser.add_argument("-f", "--full_reduce", dest="full_reduce", default=1, type=int, choices=[0,1], help="Full reduce")
-parser.add_argument("--population", nargs='+', default=10, type=int, help="The population size for the genetic algorithm.")
-parser.add_argument("--iterations", nargs='+', default=5, type=int, help="The number of iterations for the genetic algorithm.")
-parser.add_argument("--crossover_prob", nargs='+', default=0.8, type=restricted_float, help="The crossover probability for the genetic algorithm. Must be between 0.0 and 1.0.")
-parser.add_argument("--mutation_prob", nargs='+', default=0.2, type=restricted_float, help="The mutation probability for the genetic algorithm. Must be between 0.0 and 1.0.")
+#parser.add_argument("--population", nargs='+', default=10, type=int, help="The population size for the genetic algorithm.")
+#parser.add_argument("--iterations", nargs='+', default=5, type=int, help="The number of iterations for the genetic algorithm.")
+#parser.add_argument("--crossover_prob", nargs='+', default=0.8, type=restricted_float, help="The crossover probability for the genetic algorithm. Must be between 0.0 and 1.0.")
+#parser.add_argument("--mutation_prob", nargs='+', default=0.2, type=restricted_float, help="The mutation probability for the genetic algorithm. Must be between 0.0 and 1.0.")
 #parser.add_argument("--perm", default="both", choices=["row", "col", "both"], help="Whether to find a single optimal permutation that permutes the rows, columns or both with the genetic algorithm.")
-parser.add_argument("--destination", help="Destination file or folder where the compiled circuit should be stored. Otherwise the source folder is used.")
-parser.add_argument("--metrics_csv", default=None, help="The location to store compiling metrics as csv, if not given, the metrics are not calculated. Only used when the source is a folder")
-parser.add_argument("--n_compile", default=1, type=int, help="How often to run the Quilc compiler, since it is not deterministic.")
-parser.add_argument("--subfolder", default=None, type=str, nargs="+", help="Possible subfolders from the main QASM source to compile from. Less typing when source folders are in the same folder. Can also be used for subfiles.")
+#parser.add_argument("--destination", help="Destination file or folder where the compiled circuit should be stored. Otherwise the source folder is used.")
+parser.add_argument("--metrics_csv", default=None, help="The location to store compiling metrics as csv, if not given, the metrics are printed.")
+#parser.add_argument("--n_compile", default=1, type=int, help="How often to run the Quilc compiler, since it is not deterministic.")
+#parser.add_argument("--subfolder", default=None, type=str, nargs="+", help="Possible subfolders from the main QASM source to compile from. Less typing when source folders are in the same folder. Can also be used for subfiles.")
+parser.add_argument("-n", "--n_circuits", nargs='+', dest="n", default=20, type=int, help="The number of circuits to generate.")
+parser.add_argument("-p", "--n_phase_layers", nargs='+', dest="phase_layers", default=1, type=int, help="Number of layers with phases in the circuits to be generated.")
+parser.add_argument("-c", "--cnots_between_layers", nargs='+', dest="cnots", default=5, type=int, help="Number of CNOT gates between each phase layer in the circuits to be generated.")
+
 #TODO add PSO arguments
 
 def main(args):
@@ -69,26 +80,97 @@ def main(args):
         if delete_csv:
             os.remove(args.metrics_csv)
 
-    sources = make_into_list(args.QASM_source)
-    if args.subfolder is not None:
-        sources = [os.path.join(source, subfolder) for source in sources for subfolder in args.subfolder if os.path.isdir(source)]
+    #sources = make_into_list(args.QASM_source)
+    #if args.subfolder is not None:
+    #    sources = [os.path.join(source, subfolder) for source in sources for subfolder in args.subfolder if os.path.isdir(source)]
         # Remove non existing paths
 
-    sources = [source for source in sources if os.path.exists(source) or print("Warning, skipping non-existing source:", source)]
+    #sources = [source for source in sources if os.path.exists(source) or print("Warning, skipping non-existing source:", source)]
 
     if "all" in args.mode:
-        mode = elim_modes + [QUIL_COMPILER]
+        mode = elim_modes + [TKET_COMPILER]
     else:
         mode = args.mode
 
-    all_circuits = []
-    for source in sources:
-        print("Mapping qasm files in path:", source)
-        circuits = sequential_map_cnot_circuits(source, mode, args.architecture, n_qubits=args.qubits, populations=args.population,
-                                           iterations=args.iterations,
-                                           crossover_probs=args.crossover_prob, mutation_probs=args.mutation_prob,
-                                           dest_folder=args.destination, metrics_file=args.metrics_csv, n_compile=args.n_compile)
-        all_circuits.extend(circuits)
+    #all_circuits = [] 
+    #for source in sources:
+    #    print("Mapping qasm files in path:", source)
+    all_results = []
+    for a in args.architecture:
+        if a in dynamic_size_architectures:
+            archs = [create_architecture(a, n_qubits=q) for q in args.qubits]
+        else:
+            archs = [create_architecture(a)]
+        for architecture in archs:
+            for n_phase_layers in make_into_list(args.phase_layers):
+                for n_cnots_per_layer in make_into_list(args.cnots):
+                    for n_circuits in make_into_list(args.n):
+                        circuits = [make_random_phase_poly(architecture.n_qubits, n_phase_layers, n_cnots_per_layer, return_circuit=True) for _ in range(n_circuits)]
+                        results_df = map_phase_poly_circuits(circuits, architecture, mode)
+                        results_df["# phase layers"] = n_phase_layers
+                        results_df["# cnots per layer"] = n_cnots_per_layer
+                        results_df["architecture"] = architecture.name
+                        results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
+                        all_results.append(results_df)
+    results_df = concat(all_results)
+    if args.metrics_csv:
+        results_df.to_csv(args.metrics_csv)
+    else:
+        print(results_df)
+                    
+def map_phase_poly_circuits(circuits, architecture, modes, **kwargs):
+    modes = make_into_list(modes)
+    all_results = []
+    for mode in modes:
+        for i, circuit in enumerate(circuits):
+            if mode == TKET_COMPILER:
+                results = route_tket(circuit, architecture)
+            else:
+                results = route_phase_poly(circuit, architecture)
+            results["idx"] = i
+            results["mode"] = mode
+            all_results.append(results)
+    results_df = concat(all_results)
+    results_df.set_index(["idx", "mode"], inplace=True)
+    return results_df.mean(level="mode")
+        
+def route_phase_poly(circuit, architecture):
+    phase_poly = PhasePoly.fromCircuit(circuit)
+    new_circuit = phase_poly.synthesize(STEINER_MODE, architecture, n_steps=5, population=5)[0]
+    return get_metrics(new_circuit)
+
+def route_tket(circuit, architecture):
+    tk_circuit = pyzx_to_tk(circuit)
+    coupling_graph = [e for e in architecture.graph.edges()]
+    arch = Architecture(coupling_graph)
+    outcirc = route(tk_circuit, arch)
+    outcirc.decompose_SWAP_to_CX()
+    return get_metrics(tk_circuit)
+
+def get_metrics(circuit):
+    if isinstance(circuit, Circuit):
+        tk_circuit = pyzx_to_tk(circuit)
+    else:
+        tk_circuit = circuit
+    metrics = {}
+    metrics["CX depth"] = tk_circuit.depth_by_type(OpType.CX)
+    metrics["# CX"] = tk_circuit.n_gates_of_type(OpType.CX)
+    metrics["Rz depth"] = tk_circuit.depth_by_type(OpType.Rz)
+    metrics["# Rz"] = tk_circuit.n_gates_of_type(OpType.Rz)
+    return DataFrame([metrics])
+    
+
+def make_random_phase_poly(n_qubits, n_phase_layers, cnots_per_layer, return_circuit=False):
+    c = CNOT_tracker(n_qubits)
+    for _ in range(n_phase_layers):
+        build_random_parity_map(n_qubits, cnots_per_layer, circuit=c)
+        for i in range(n_qubits):
+            phase = np.random.choice([1,-1])*Fraction(1, int(np.random.choice([1,2,4])))
+            c.add_gate(ZPhase(target=i, phase=phase))
+    if return_circuit:
+        return c
+    else:
+        return PhasePoly.fromCircuit(c)
 
 class PhasePoly():
 
@@ -133,7 +215,7 @@ class PhasePoly():
         zphases = {par:clamp(r) for par, r in zphases.items() if clamp(r) != 0}
         xphases = {par:clamp(r) for par, r in xphases.items() if clamp(r) != 0}
         if final_qubit_placement is not None:
-            current_parities = ["".join([ parity[i] for i in final_qubit_placement]) for parity in current_parities]
+            current_parities = [ current_parities[i] for i in final_qubit_placement]
         return PhasePoly(zphases, xphases, current_parities)
 
     def partition(self):
@@ -254,6 +336,9 @@ class PhasePoly():
         return circuit, perms[0], perms[-1]
 
 def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwargs):
+    """
+    Broken!
+    """
     n_qubits = architecture.n_qubits
     current_perm = [i for i in range(n_qubits)]
     initial_perm = current_perm
@@ -271,11 +356,12 @@ def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwarg
             # Copy the synthesized circuit
             for g in new_circ.gates:
                 final_circuit.add_gate(g)
+
+            # Update new permutation
+            current_perm = out_perm
             # Add the hadamard gate
             g = HAD(current_perm[gate.target])
             final_circuit.add_gate(g)
-            # Update new permutation
-            current_perm = out_perm
             # Start a new circuit
             c = Circuit(n_qubits)
         else:
@@ -283,7 +369,7 @@ def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwarg
     phase_poly = PhasePoly.fromCircuit(c)
     new_circ, in_perm, out_perm = phase_poly.synthesize(mode, architecture, input_perm=input_perm, output_perm=output_perm, **kwargs)
     # Store the initial permutation
-    if initial_perm is None:
+    if input_perm:
         initial_perm = in_perm
     # Copy the synthesized circuit
     for g in new_circ.gates:

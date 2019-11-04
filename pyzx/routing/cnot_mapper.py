@@ -37,6 +37,7 @@ elim_modes = genetic_elim_modes + pso_elim_modes + basic_elim_modes
 # COMPILE MODES
 QUIL_COMPILER = "quilc"
 NO_COMPILER = "not_compiled"
+TKET_COMPILER = "tket"
 
 compiler_modes = [QUIL_COMPILER, NO_COMPILER]
 

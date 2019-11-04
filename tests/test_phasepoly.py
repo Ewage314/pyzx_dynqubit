@@ -15,6 +15,10 @@ from pyzx.tensor import compare_tensors
 from pyzx.routing.architecture import create_architecture
 from pyzx.extract import permutation_as_swaps
 
+
+from pytket.pyzx import pyzx_to_tk
+from pytket.backends.ibm import AerStateBackend
+
 SEED = 42
 
 class TestPhasePoly(unittest.TestCase):
@@ -28,7 +32,7 @@ class TestPhasePoly(unittest.TestCase):
         folder = "circuits/steiner/"+str(self.n_qubits)+"qubits/"
         n_cnots = next(os.walk(folder))[1]
         self.circuit = []
-        n_phase_layers = 2
+        n_phase_layers = 5
         self.n_phase_layers=n_phase_layers
         def filename():
             return os.path.join(*[folder, n_cnots[np.random.choice(len(n_cnots))], 'Original'+str(np.random.choice(20))+".qasm"])
@@ -36,11 +40,11 @@ class TestPhasePoly(unittest.TestCase):
             c = Circuit.from_qasm_file(filename())
             for _ in range(n_phase_layers):
                 for i in range(self.n_qubits):
-                    phase = np.random.choice([1,-1])*Fraction(1, int(np.random.choice([1,2,4])))
-                    if np.random.choice(2):
+                    if np.random.choice(2, p=[.2, .8]) == 1: # Pick H gate with chance .2
+                        phase = np.random.choice([1,-1])*Fraction(1, int(np.random.choice([1,2,4])))
                         c.add_gate(ZPhase(target=i, phase=phase))
                     else:
-                        c.add_gate(XPhase(target=i, phase=phase))
+                        c.add_gate(HAD(target=i))
                 c.add_circuit(Circuit.from_qasm_file(filename()))
             self.circuit.append(c)
 
@@ -69,7 +73,16 @@ class TestPhasePoly(unittest.TestCase):
                 self.assertListEqual(a1.tolist(), a2.tolist())
 
     def assertCircuitEquivalent(self, c1, c2):
-        self.assertMat2Equal(c1.matrix.copy(), c2.matrix.copy())
+        tk_circuit1 = pyzx_to_tk(c1)
+        tk_circuit2 = pyzx_to_tk(c2)
+        aer_state_b = AerStateBackend()
+        statevector1 = aer_state_b.get_state(tk_circuit1)
+        statevector2 = aer_state_b.get_state(tk_circuit2)
+        print("circuit equivalent")
+        print(statevector1)
+        print(statevector2)
+        self.assertNdArrEqual(statevector1, statevector2)
+
 
     def assertPhasePolyEqual(self, p1, p2):
         self.assertDictEqual(p1.xphases, p2.xphases)
@@ -187,16 +200,66 @@ class TestPhasePoly(unittest.TestCase):
                         break
                     c.add_gate(gate)
                 self.do_phase_poly(c.copy(), STEINER_MODE, self.architecture, routed=True)
-
+    
     def test_tpar(self):
-        pass
-
-    def do_phase_poly(self, circuit, mode, architecture, routed=False):
+        for i in range(self.n_tests):
+            with self.subTest(i=i):
+                c = Circuit(self.circuit[i].qubits)
+                for gate in self.circuit[i].gates:
+                    c.add_gate(gate)
+                for permute_input, permute_output in [(i,j) for i in [True, False] for j in [True, False]]:
+                    with self.subTest(i=(i, permute_input, permute_output)):
+                        new_circuit, initial_perm, output_perm = tpar(c, STEINER_MODE, self.architecture, input_perm=permute_input, output_perm=permute_output)
+                        adjusted_circuit = self.apply_perms(new_circuit, initial_perm, output_perm)
+                        self.assertCircuitEquivalent(c, adjusted_circuit)
+    
+    def do_phase_poly(self, circuit, mode, architecture, routed=False, tensor_compare=False):
         phase_poly = PhasePoly.fromCircuit(circuit)
         # Check the synthesized circuit
         new_circuit, initial_perm, output_perm = phase_poly.synthesize(mode=mode, architecture=architecture, full_reduce=True)
         if routed:
             self.assertGates(new_circuit)
+        adjusted_circuit = self.apply_perms(new_circuit, initial_perm, output_perm)
+        new_phase_poly = PhasePoly.fromCircuit(adjusted_circuit)
+        # Check if the phasepolys are the same
+        self.assertPhasePolyEqual(phase_poly, new_phase_poly)
+        self.assertFinalParityEqual(circuit, adjusted_circuit)
+        # Check if the tensors are the same
+        #if tensor_compare: # TODO figure out what goes wrong
+        print("Original circuit:")
+        print(*[(g, g.target) for g in circuit.gates], sep="\n")
+        print("Adjusted circuit:")
+        print(*[g for g in adjusted_circuit.gates], sep="\n")
+        self.assertCircuitEquivalent(adjusted_circuit, circuit)
+        the_same = compare_tensors(adjusted_circuit, circuit)
+        self.assertTrue(the_same)
+   
+    
+    def test_tensor_compare(self):
+        n_qubits = 3
+        old_qubits = self.n_qubits
+        self.n_qubits = n_qubits
+        circuit = Circuit(n_qubits)
+        n_cnots = 1
+        for _ in range(n_cnots):
+            circuit.add_gate("CNOT", *np.random.choice(n_qubits, 2, False))
+        for i in range(self.n_qubits):
+            phase = np.random.choice([1,-1])*Fraction(1, int(np.random.choice([1,2,4])))
+            circuit.add_gate(ZPhase(target=i, phase=phase))
+        for _ in range(n_cnots):
+            circuit.add_gate("CNOT", *np.random.choice(n_qubits, 2, False))
+        for i in range(self.n_qubits):
+            phase = np.random.choice([1,-1])*Fraction(1, int(np.random.choice([1,2,4])))
+            circuit.add_gate(ZPhase(target=i, phase=phase))
+        for _ in range(n_cnots):
+            circuit.add_gate("CNOT", *np.random.choice(n_qubits, 2, False))
+        print("Test circuit")
+        for g in circuit.gates:
+            print(g)
+        self.do_phase_poly(circuit.copy(), STEINER_MODE, None, routed=False, tensor_compare=True)
+        self.n_qubits = old_qubits
+    
+    def apply_perms(self, circuit, initial_perm, output_perm):
         adjusted_circuit = Circuit(self.n_qubits)
         # Undo the initial permutation
         for q1, q2 in permutation_as_swaps({v:k for k,v in enumerate(initial_perm)}):
@@ -204,23 +267,15 @@ class TestPhasePoly(unittest.TestCase):
             adjusted_circuit.add_gate(CNOT(q2, q1))
             adjusted_circuit.add_gate(CNOT(q1, q2))
         # Do the circuit
-        for gate in new_circuit.gates:
+        for gate in circuit.gates:
             adjusted_circuit.add_gate(gate)
-        #adjusted_circuit.add_circuit(new_circuit)
         # Realise the output permutation
         for q1, q2 in permutation_as_swaps({k:v for k,v in enumerate(output_perm)}):
             adjusted_circuit.add_gate(CNOT(q1, q2))
             adjusted_circuit.add_gate(CNOT(q2, q1))
             adjusted_circuit.add_gate(CNOT(q1, q2))
-        #new_phase_poly = PhasePoly.fromCircuit(new_circuit, initial_qubit_placement=initial_perm, final_qubit_placement=output_perm)
-        new_phase_poly = PhasePoly.fromCircuit(adjusted_circuit)
-        # Check if the phasepolys are the same
-        self.assertPhasePolyEqual(phase_poly, new_phase_poly)
-        self.assertFinalParityEqual(circuit, adjusted_circuit)
-        # Check if the tensors are the same
-        if self.n_phase_layers < 2: # TODO figure out what goes wrong
-            the_same = compare_tensors(adjusted_circuit, circuit)
-            self.assertTrue(the_same)
+        return adjusted_circuit
+
         
                             
 
