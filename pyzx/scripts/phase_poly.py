@@ -281,6 +281,10 @@ class PhasePoly():
         # TODO - find an optimal ordering of the partitions for synthesis
         ordered_partitions = []
         for partition in partitions:
+            # Add identity parities to the partition if the set is not full yet.
+            matrix = Mat2([[int(s) for s in parity] for parity in partition])
+            matrix, _ = inverse_hack(matrix)
+            partition = ["".join([str(i) for i in parity]) for parity in matrix.data]
             new_partition = [None]*self.n_qubits
             for parity in partition:
                 if parity.count("1") == 1:
@@ -291,11 +295,10 @@ class PhasePoly():
                     while new_partition[i] is not None:
                         i += 1
                     new_partition[i] = parity
-            while None in new_partition:
-                new_partition.remove(None)
+            #while None in new_partition:
+            #    new_partition.remove(None)
             ordered_partitions.append(new_partition)
         return ordered_partitions
-        return partitions
     
     def _dfs(self, nodes, graph, inv_vs_dict, partitions):
         # recursive dfs to find the shortest path
@@ -321,6 +324,7 @@ class PhasePoly():
         return inverse_hack(m) is not None
 
     def synthesize(self, mode, architecture, **kwargs):
+        kwargs["full_reduce"] = True
         n_qubits = architecture.n_qubits if architecture is not None else len(self.out_par)
         # Partition the parities
         partitions = self.partition()+[self.out_par]
@@ -335,15 +339,16 @@ class PhasePoly():
             other_matrices.append(new_matrix*prev_matrix) 
             prev_matrix = inverse
         if mode == TKET_STEINER_MODE:
-            temp_CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in other_matrices], mode=GAUSS_MODE, architecture=architecture)
+            temp_CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in other_matrices], mode=GAUSS_MODE, architecture=architecture, full_reduce=True)
             perms = []
+            #print(*[c.gates for c in temp_CNOT_circuits], sep="\n")
             # TODO - this can be made more memory/time efficient by doing it in reverse.
             arch = get_tk_architecture(architecture)
             perm = np.arange(n_qubits)
-            for i in range(len(temp_CNOT_circuits)):
+            for idx in range(len(other_matrices)):
                 # Make the partial circuit
                 circuit = Circuit(n_qubits)
-                for c in temp_CNOT_circuits[i:]:
+                for c in temp_CNOT_circuits[idx:]:
                     for g in c.gates:
                         target = perm[g.target] 
                         if isinstance(g, CNOT):
@@ -353,23 +358,34 @@ class PhasePoly():
                         else:
                             circuit.add_gate(g.name, target)
                 tk_circuit = pyzx_to_tk(circuit)
-                perm = graph_placement(tk_circuit, arch)
-                perm_dict = {p[1].index[0]: p[0].index[0] for p in perm.items()}
+                new_perm = graph_placement(tk_circuit, arch)
+                perm_dict = {p[1].index[0]: p[0].index[0] for p in new_perm.items()} # TODO - double check if this is not the reverse permutation.
                 #print(perm_dict)
-                perm2 = np.asarray([perm_dict[i] if i in perm_dict else None for i in range(n_qubits)])
+                perm2 = [perm_dict[i] if i in perm_dict else None for i in range(n_qubits)]
+                #print([v for v in new_perm.items()])
+                #print(other_matrices[idx])
                 #print(perm2)
                 perm_idx  = [i for i in range(n_qubits) if perm2[i] is None]
                 perm_val = [i for i in range(n_qubits) if i not in perm2]
-                perm2[perm_idx] = perm_val
+                for j, v in zip(perm_idx, perm_val):
+                    perm2[j] = v
+                perm2 = np.asarray(perm2)
                 #print(perm2)
                 #exit(42)
-                perm = perm2
-                perms.append(perm2)
+                #print(perm, perm[perm2])
+                #print(other_matrices[idx].rows(), other_matrices[idx].cols())
+                #print(Mat2([[other_matrices[idx].data[k][l] for l in perm ] for k in perm[perm2]]))
+                #print()
+                perm = perm[perm2]
+                perms.append(perm)
             perms.append(perms[-1]) # Add the intitial permutation of the last CNOT block as final permutation of the full circuit
             # Rotate all matrices accordingly
             new_matrices = []
             for i, input_perm, output_perm in zip(range(len(temp_CNOT_circuits)), perms, perms[1:]):
                 new_matrices.append(Mat2([[other_matrices[i].data[k][l] for l in input_perm] for k in output_perm]))
+            #print("start")
+            #print(*new_matrices, sep="\n-------------\n")
+            #print("end")
             CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in new_matrices], mode=STEINER_MODE, architecture=architecture, **kwargs)
         else:
             CNOT_circuits, perms, _ = sequential_gauss([m.copy() for m in other_matrices], mode=mode, architecture=architecture, **kwargs)

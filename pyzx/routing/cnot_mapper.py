@@ -235,9 +235,11 @@ def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, c
     return best_permutation, circuit, rank
 
 def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, input_perm=True, output_perm=True, 
-                        swarm_size=15, n_steps=5, s_crossover=0.4, p_crossover=0.3, pso_mutation=0.2, n_threads=None, **kwargs):
+                        swarm_size=15, n_steps=5, s_crossover=0.4, p_crossover=0.3, pso_mutation=0.2, n_threads=None, full_reduce=True, **kwargs):
     n_qubits = len(matrices[0].data)
-    
+    kwargs["full_reduce"] = full_reduce
+    #print(mode)
+    #print(*matrices, sep="\n\n")
     if mode in basic_elim_modes or mode is None:
         circuits = [CNOT_tracker(n_qubits) for _ in matrices]
         permutations = [np.arange(n_qubits) for _ in range(len(matrices)+1)]

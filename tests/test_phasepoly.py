@@ -25,7 +25,7 @@ class TestPhasePoly(unittest.TestCase):
 
     def setUp(self):
         self.n_tests = 10
-        self.n_qubits = 5
+        self.n_qubits = 9
         name = "line"
         self.architecture = create_architecture(name, n_qubits=self.n_qubits)
         # Define some circuits to work with
@@ -75,16 +75,24 @@ class TestPhasePoly(unittest.TestCase):
     def assertCircuitEquivalent(self, c1, c2):
         the_same = compare_tensors(c1, c2)
         self.assertTrue(the_same)
-        return
+        #return
         # TODO adjust the code below to fit the new pytket version
         tk_circuit1 = pyzx_to_tk(c1)
         tk_circuit2 = pyzx_to_tk(c2)
-        aer_state_b = AerStateBackend()
-        statevector1 = aer_state_b.get_state(tk_circuit1)
-        statevector2 = aer_state_b.get_state(tk_circuit2)
-        print("circuit equivalent")
-        print(statevector1)
-        print(statevector2)
+        try:
+            aer_state_b = AerStateBackend()
+            compiled1 = aer_state_b.compile_circuit(tk_circuit1)
+            compiled2 = aer_state_b.compile_circuit(tk_circuit2)
+            statevector1 = aer_state_b.get_state(compiled1)
+            statevector2 = aer_state_b.get_state(compiled2)
+        except:
+            print(tk_circuit1.get_commands())
+            print(tk_circuit2.get_commands())
+            print("--------- this one")
+            exit(42)
+        #print("circuit equivalent")
+        #print(statevector1)
+        #print(statevector2)
         self.assertNdArrEqual(statevector1, statevector2)
 
 
@@ -97,7 +105,13 @@ class TestPhasePoly(unittest.TestCase):
         flat_partition = [p for subset in partition for p in subset]
         # Are all sets partitioned?
         [self.assertIn(s, flat_partition) for s in sets]
-        [self.assertIn(p, sets) for p in flat_partition]
+        extra_parities = []
+        for p in flat_partition:
+            if p not in sets:
+                extra_parities.append(p)
+        [self.assertTrue(p.count("1")==1) for p in extra_parities] # Only identity rows
+        #self.assertCountEqual(extra_parities, list(set(extra_parities))) # No duplicates
+        #[self.assertIn(p, sets) for p in flat_partition]
         # Is every partition a set of independent parities?
         [self.assertTrue(PhasePoly._independent(None, p)) for p in partition]
 
@@ -242,7 +256,6 @@ class TestPhasePoly(unittest.TestCase):
         # Check if the circuits are the same
         self.assertCircuitEquivalent(adjusted_circuit, circuit)
         
-    
     def test_tensor_compare(self):
         n_qubits = 3
         old_qubits = self.n_qubits
@@ -266,6 +279,27 @@ class TestPhasePoly(unittest.TestCase):
             print(g)
         self.do_phase_poly(circuit.copy(), STEINER_MODE, None, routed=False, tensor_compare=True)
         self.n_qubits = old_qubits
+
+    def test_phase_poly_creation(self):
+        for i in range(self.n_tests):
+            with self.subTest(i=i):
+                n_qubits = self.circuit[i].qubits
+                circuit = Circuit(n_qubits)
+                for gate in self.circuit[i].gates:
+                    if isinstance(gate, HAD):
+                        break
+                    circuit.add_gate(gate)
+                # Check if the phase poly is created properly
+                phase_poly = PhasePoly.fromCircuit(circuit.copy())
+                phase_poly2 = PhasePoly.fromCircuit(circuit.copy())
+                self.assertPhasePolyEqual(phase_poly, phase_poly2)
+                c1, in1, out1 = phase_poly.synthesize(STEINER_MODE, self.architecture, full_reduce=True)
+                c2, in2, out2 = phase_poly2.synthesize("tket-steiner", self.architecture, full_reduce=True)
+                new_c1 = self.apply_perms(c1, in1, out1)
+                new_c2 = self.apply_perms(c2, in2, out2)
+                self.assertCircuitEquivalent(circuit, new_c1)
+                self.assertCircuitEquivalent(circuit, new_c2)
+                self.assertCircuitEquivalent(new_c1, new_c2)
     
     def apply_perms(self, circuit, initial_perm, output_perm):
         adjusted_circuit = Circuit(self.n_qubits)
