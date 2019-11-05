@@ -139,6 +139,7 @@ def map_phase_poly_circuits(circuits, architecture, modes, **kwargs):
             #print("done", i)
     results_df = concat(all_results)
     results_df.set_index(["idx", "mode"], inplace=True)
+    print(results_df)
     return results_df.mean(level="mode")
         
 def route_phase_poly(circuit, architecture, mode):
@@ -286,15 +287,47 @@ class PhasePoly():
             matrix, _ = inverse_hack(matrix)
             partition = ["".join([str(i) for i in parity]) for parity in matrix.data]
             new_partition = [None]*self.n_qubits
+            skipped_parities = []
             for parity in partition:
                 if parity.count("1") == 1:
                     new_partition[parity.index("1")] = parity
+                else:
+                    skipped_parities.append(parity)
+            skipped_idxs = []
+            deliberating = []
+            for i in range(self.n_qubits):
+                if new_partition[i] is None:
+                    # Find the best parity in skipped_parities to place there
+                    pivotted_parities = [p for p in skipped_parities if p[i] == "1"]
+                    if pivotted_parities:
+                        pivotted_parities = sorted(pivotted_parities, key=lambda parity: parity.index("1"))
+                        if len(pivotted_parities) == 1:
+                            chosen = pivotted_parities[0]
+                            new_partition[i] = chosen
+                            skipped_parities.remove(chosen)
+                        else:
+                            deliberating.append((i, pivotted_parities))
+                    else:
+                        skipped_idxs.append(i)
+            for i, pivotted_parities in deliberating:
+                pivotted_parities = [p for p in pivotted_parities if p in skipped_parities]
+                if pivotted_parities:
+                    chosen = pivotted_parities[0]
+                    new_partition[i] = chosen
+                    skipped_parities.remove(chosen)
+                else:
+                    skipped_idxs.append(i)
+            for i in skipped_idxs:
+                new_partition[i] = skipped_parities.pop()
+
+            """
             i = 0
             for parity in partition:
                 if parity.count("1") != 1:
                     while new_partition[i] is not None:
                         i += 1
                     new_partition[i] = parity
+            """
             #while None in new_partition:
             #    new_partition.remove(None)
             ordered_partitions.append(new_partition)
@@ -341,7 +374,8 @@ class PhasePoly():
         if mode == TKET_STEINER_MODE:
             temp_CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in other_matrices], mode=GAUSS_MODE, architecture=architecture, full_reduce=True)
             perms = []
-            #print(*[c.gates for c in temp_CNOT_circuits], sep="\n")
+            print(*[c.gates for c in temp_CNOT_circuits], sep="\n")
+            print(*other_matrices, sep="\n-------------\n")
             # TODO - this can be made more memory/time efficient by doing it in reverse.
             arch = get_tk_architecture(architecture)
             perm = np.arange(n_qubits)
@@ -362,7 +396,7 @@ class PhasePoly():
                 perm_dict = {p[1].index[0]: p[0].index[0] for p in new_perm.items()} # TODO - double check if this is not the reverse permutation.
                 #print(perm_dict)
                 perm2 = [perm_dict[i] if i in perm_dict else None for i in range(n_qubits)]
-                #print([v for v in new_perm.items()])
+                print([v for v in new_perm.items()])
                 #print(other_matrices[idx])
                 #print(perm2)
                 perm_idx  = [i for i in range(n_qubits) if perm2[i] is None]
@@ -383,9 +417,10 @@ class PhasePoly():
             new_matrices = []
             for i, input_perm, output_perm in zip(range(len(temp_CNOT_circuits)), perms, perms[1:]):
                 new_matrices.append(Mat2([[other_matrices[i].data[k][l] for l in input_perm] for k in output_perm]))
-            #print("start")
-            #print(*new_matrices, sep="\n-------------\n")
-            #print("end")
+            print("start")
+            print(perms)
+            print(*new_matrices, sep="\n-------------\n")
+            print("end")
             CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in new_matrices], mode=STEINER_MODE, architecture=architecture, **kwargs)
         else:
             CNOT_circuits, perms, _ = sequential_gauss([m.copy() for m in other_matrices], mode=mode, architecture=architecture, **kwargs)
