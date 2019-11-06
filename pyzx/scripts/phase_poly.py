@@ -112,6 +112,8 @@ def main(args):
                         print(circuits[1])
                         print(get_metrics(circuits[1]))
                         results_df = map_phase_poly_circuits(circuits, architecture, mode)
+                        kwargs = {"level":"mode"}
+                        results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), results_df.median(**kwargs).add_suffix("_median"), results_df.min(**kwargs).add_suffix("_min"), results_df.max(**kwargs).add_suffix("_max")], axis=1)
                         results_df["# phase layers"] = n_phase_layers
                         results_df["# cnots per layer"] = n_cnots_per_layer
                         results_df["architecture"] = architecture.name
@@ -119,7 +121,11 @@ def main(args):
                         all_results.append(results_df)
     results_df = concat(all_results)
     if args.metrics_csv:
-        results_df.to_csv(args.metrics_csv)
+        if os.path.exists(args.metrics_csv):
+            with open(args.metrics_csv, 'a') as f:
+                results_df.to_csv(f, header=False)
+        else:
+            results_df.to_csv(args.metrics_csv)
     else:
         print(results_df)
                     
@@ -139,7 +145,11 @@ def map_phase_poly_circuits(circuits, architecture, modes, **kwargs):
             #print("done", i)
     results_df = concat(all_results)
     results_df.set_index(["idx", "mode"], inplace=True)
-    print(results_df)
+    return results_df
+    print("median")
+    print(results_df.median(level="mode"))
+    print(results_df.min(level="mode"))
+    print(results_df.max(level="mode"))
     return results_df.mean(level="mode")
         
 def route_phase_poly(circuit, architecture, mode):
@@ -285,54 +295,52 @@ class PhasePoly():
             # Add identity parities to the partition if the set is not full yet.
             matrix = Mat2([[int(s) for s in parity] for parity in partition])
             matrix, _ = inverse_hack(matrix)
+            parity_placement = self._place_parities(matrix)
             partition = ["".join([str(i) for i in parity]) for parity in matrix.data]
-            new_partition = [None]*self.n_qubits
-            skipped_parities = []
-            for parity in partition:
-                if parity.count("1") == 1:
-                    new_partition[parity.index("1")] = parity
-                else:
-                    skipped_parities.append(parity)
-            skipped_idxs = []
-            deliberating = []
-            for i in range(self.n_qubits):
-                if new_partition[i] is None:
-                    # Find the best parity in skipped_parities to place there
-                    pivotted_parities = [p for p in skipped_parities if p[i] == "1"]
-                    if pivotted_parities:
-                        pivotted_parities = sorted(pivotted_parities, key=lambda parity: parity.index("1"))
-                        if len(pivotted_parities) == 1:
-                            chosen = pivotted_parities[0]
-                            new_partition[i] = chosen
-                            skipped_parities.remove(chosen)
-                        else:
-                            deliberating.append((i, pivotted_parities))
-                    else:
-                        skipped_idxs.append(i)
-            for i, pivotted_parities in deliberating:
-                pivotted_parities = [p for p in pivotted_parities if p in skipped_parities]
-                if pivotted_parities:
-                    chosen = pivotted_parities[0]
-                    new_partition[i] = chosen
-                    skipped_parities.remove(chosen)
-                else:
-                    skipped_idxs.append(i)
-            for i in skipped_idxs:
-                new_partition[i] = skipped_parities.pop()
-
-            """
-            i = 0
-            for parity in partition:
-                if parity.count("1") != 1:
-                    while new_partition[i] is not None:
-                        i += 1
-                    new_partition[i] = parity
-            """
-            #while None in new_partition:
-            #    new_partition.remove(None)
+            new_partition = [partition[i] for i in parity_placement]
             ordered_partitions.append(new_partition)
         return ordered_partitions
     
+    def _place_parities(self, parities):
+        if isinstance(parities, Mat2):
+            parities = parities.data
+        permutation = [None]*self.n_qubits
+        skipped_parities = []
+        # Greedily map identity rows
+        for i, parity in enumerate(parities):
+            if parity.count(1) == 1:
+                permutation[parity.index(1)] = i
+            else:
+                skipped_parities.append((i, parity))
+        skipped_idxs = []
+        deliberating = []
+        for i in range(self.n_qubits):
+            if permutation[i] is None:
+                # Find the best parity in skipped_parities to place there
+                pivotted_parities = [(j, p) for j, p in skipped_parities if p[i] == 1]
+                if pivotted_parities:
+                    pivotted_parities = sorted(pivotted_parities, key=lambda parity: parity[1].index(1))
+                    if len(pivotted_parities) == 1:
+                        chosen = pivotted_parities[0]
+                        permutation[i] = chosen[0]
+                        skipped_parities.remove(chosen)
+                    else:
+                        # If there are multiple options, try them later
+                        deliberating.append((i, pivotted_parities))
+                else:
+                    skipped_idxs.append(i)
+        for i, pivotted_parities in deliberating:
+            pivotted_parities = [p for p in pivotted_parities if p in skipped_parities]
+            if pivotted_parities:
+                chosen = pivotted_parities[0]
+                permutation[i] = chosen[0]
+                skipped_parities.remove(chosen)
+            else:
+                skipped_idxs.append(i)
+        for i in skipped_idxs:
+            permutation[i] = skipped_parities.pop()[0]
+        return np.asarray(permutation)
+
     def _dfs(self, nodes, graph, inv_vs_dict, partitions):
         # recursive dfs to find the shortest path
         if nodes == []:
@@ -362,6 +370,7 @@ class PhasePoly():
         # Partition the parities
         partitions = self.partition()+[self.out_par]
         parities = [[[int(v) for v in parity] for parity in partition] for partition in partitions]
+        # TODO - find optimal ordering of the partitions.
         # Make the parity sets into matrices
         matrices = [Mat2([p for p in partition]) for partition in parities]
         # The matrices to be computed need to first undo the previous parities and then obtain the new parities
@@ -372,56 +381,64 @@ class PhasePoly():
             other_matrices.append(new_matrix*prev_matrix) 
             prev_matrix = inverse
         if mode == TKET_STEINER_MODE:
-            temp_CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in other_matrices], mode=GAUSS_MODE, architecture=architecture, full_reduce=True)
+            #print(len(partitions))
+            #temp_CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in other_matrices], mode=GAUSS_MODE, architecture=architecture, full_reduce=True)
             perms = []
-            print(*[c.gates for c in temp_CNOT_circuits], sep="\n")
-            print(*other_matrices, sep="\n-------------\n")
+            #print(*[c.gates for c in temp_CNOT_circuits], sep="\n")
+            #print(*other_matrices, sep="\n-------------\n")
             # TODO - this can be made more memory/time efficient by doing it in reverse.
             arch = get_tk_architecture(architecture)
-            perm = np.arange(n_qubits)
+            current_perm = np.arange(n_qubits)
             for idx in range(len(other_matrices)):
                 # Make the partial circuit
                 circuit = Circuit(n_qubits)
-                for c in temp_CNOT_circuits[idx:]:
+                #next_perm = current_perm[self._place_parities([[row[j] for j in current_perm] for row in other_matrices[idx].data])]
+                next_perm = self._place_parities([[row[j] for j in current_perm] for row in other_matrices[idx].data])
+                
+                # TODO - find a better output ordering to start with.
+                permuted_matrices = [Mat2([[other_matrices[idx].data[k][l] for l in current_perm] for k in next_perm])]
+                if idx < len(other_matrices)-1:
+                    permuted_matrices += [Mat2([[m.data[k][l] for l in next_perm] for k in next_perm]) for m in other_matrices[idx+1:]]
+                temp_CNOT_circuits, _, _ = sequential_gauss(permuted_matrices, mode=GAUSS_MODE, architecture=architecture, full_reduce=True)
+                #perm_dict = {v:k for k,v in enumerate(current_perm)}
+                #inv_perm = [perm_dict[i] for i in range(self.n_qubits)]
+                for c in temp_CNOT_circuits:
                     for g in c.gates:
-                        target = perm[g.target] 
+                        target = current_perm[g.target] 
                         if isinstance(g, CNOT):
                             #print(g)
-                            control = perm[g.control]
+                            control = current_perm[g.control]
                             circuit.add_gate(g.name, control, target)
                         else:
                             circuit.add_gate(g.name, target)
+                # Get a better qubit placement from tket
                 tk_circuit = pyzx_to_tk(circuit)
                 new_perm = graph_placement(tk_circuit, arch)
-                perm_dict = {p[1].index[0]: p[0].index[0] for p in new_perm.items()} # TODO - double check if this is not the reverse permutation.
-                #print(perm_dict)
-                perm2 = [perm_dict[i] if i in perm_dict else None for i in range(n_qubits)]
-                print([v for v in new_perm.items()])
-                #print(other_matrices[idx])
-                #print(perm2)
-                perm_idx  = [i for i in range(n_qubits) if perm2[i] is None]
-                perm_val = [i for i in range(n_qubits) if i not in perm2]
+                # Parse the placement into a np.array permutation
+                perm_dict = {p[1].index[0]: p[0].index[0] for p in new_perm.items()} 
+                new_perm = [perm_dict[i] if i in perm_dict else None for i in range(n_qubits)]
+                perm_idx  = [i for i in range(n_qubits) if new_perm[i] is None]
+                perm_val = [i for i in range(n_qubits) if i not in new_perm]
                 for j, v in zip(perm_idx, perm_val):
-                    perm2[j] = v
-                perm2 = np.asarray(perm2)
-                #print(perm2)
-                #exit(42)
-                #print(perm, perm[perm2])
-                #print(other_matrices[idx].rows(), other_matrices[idx].cols())
-                #print(Mat2([[other_matrices[idx].data[k][l] for l in perm ] for k in perm[perm2]]))
-                #print()
-                perm = perm[perm2]
-                perms.append(perm)
-            perms.append(perms[-1]) # Add the intitial permutation of the last CNOT block as final permutation of the full circuit
+                    new_perm[j] = v
+                new_perm = np.asarray(new_perm)
+                current_perm = current_perm[new_perm]
+                perms.append(current_perm)
+                next_perm = next_perm[new_perm]
+                current_perm = next_perm
+            perms.append(next_perm) # Add the intitial permutation of the last CNOT block as final permutation of the full circuit
             # Rotate all matrices accordingly
             new_matrices = []
-            for i, input_perm, output_perm in zip(range(len(temp_CNOT_circuits)), perms, perms[1:]):
+            for i, input_perm, output_perm in zip(range(len(other_matrices)), perms, perms[1:]):
                 new_matrices.append(Mat2([[other_matrices[i].data[k][l] for l in input_perm] for k in output_perm]))
-            print("start")
-            print(perms)
-            print(*new_matrices, sep="\n-------------\n")
-            print("end")
+            #print("start")
+            #print(perms)
+            #print(*new_matrices, sep="\n-------------\n")
+            #print("end")
+            #print(perms[-1])
+            #print(new_matrices[-1], "\n\n")
             CNOT_circuits, _, _ = sequential_gauss([m.copy() for m in new_matrices], mode=STEINER_MODE, architecture=architecture, **kwargs)
+            #print(*["\n".join([str(x) for x in [m1, p1, p2, m2, c.gates]]) for p1, p2, m1, m2,c in zip(perms, perms[1:], other_matrices, new_matrices, CNOT_circuits)], sep="\n\n")
         else:
             CNOT_circuits, perms, _ = sequential_gauss([m.copy() for m in other_matrices], mode=mode, architecture=architecture, **kwargs)
         zphases = list(self.zphases.keys())
