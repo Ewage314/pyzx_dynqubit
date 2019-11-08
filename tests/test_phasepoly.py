@@ -9,7 +9,7 @@ from fractions import Fraction
 from pyzx.routing.cnot_mapper import GAUSS_MODE, PSO_GAUSS_MODE, STEINER_MODE, PSO_STEINER_MODE, GENETIC_STEINER_MODE, GENETIC_GAUSS_MODE
 from pyzx.parity_maps import CNOT_tracker
 from pyzx.linalg import Mat2
-from pyzx.scripts.phase_poly import PhasePoly, tpar
+from pyzx.routing.phase_poly import PhasePoly, tpar
 from pyzx.circuit import Circuit, HAD, T, CNOT, ZPhase, XPhase
 from pyzx.tensor import compare_tensors
 from pyzx.routing.architecture import create_architecture
@@ -97,7 +97,7 @@ class TestPhasePoly(unittest.TestCase):
 
 
     def assertPhasePolyEqual(self, p1, p2):
-        self.assertDictEqual(p1.xphases, p2.xphases)
+        #self.assertDictEqual(p1.xphases, p2.xphases)
         self.assertDictEqual(p1.zphases, p2.zphases)
         self.assertListEqual(p1.out_par, p2.out_par)
 
@@ -138,7 +138,7 @@ class TestPhasePoly(unittest.TestCase):
                 # Check if the phase poly is created properly
                 phase_poly = PhasePoly.fromCircuit(circuit)
                 # Check the paritions
-                partitions = phase_poly.partition()
+                partitions = phase_poly.partition(skip_output_parities=False)
                 self.assertPartitionEqual(phase_poly.all_parities, partitions)
 
     def test_phase_poly_parity_creation(self):
@@ -184,7 +184,7 @@ class TestPhasePoly(unittest.TestCase):
                 # Check if the output parities are the same
                 self.assertListEqual(original_out_par, phase_poly.out_par)
                 # Check if the original phase poly is the same 
-                phase_poly_parities = list(phase_poly.zphases.keys()) + list(phase_poly.xphases.keys())
+                phase_poly_parities = list(phase_poly.zphases.keys()) # + list(phase_poly.xphases.keys())
                 for parity in phase_poly_parities:
                     # Check  if all phase poly parities are in the original
                     self.assertIn(parity, original_out_par)

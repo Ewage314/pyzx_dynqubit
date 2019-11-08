@@ -37,7 +37,8 @@ if __name__ == '__main__':
         from .scripts import cnot2cnot
         from .scripts import circuit_router
         from .scripts import cnot_generator
-        from .scripts import phase_poly
+        from .scripts import phase_poly_generator
+        from .scripts import phase_poly_router
     except SystemError:
         print("Please run as a module by using 'python -m pyzx'")
         exit(1)
@@ -61,9 +62,9 @@ if __name__ == '__main__':
     if args.command == 'mapper':
         cnot2cnot.main(sys.argv[2:])
     if args.command == 'router':
-        circuit_router.main(sys.argv[2:])
+        phase_poly_router.main(sys.argv[2:])
     if args.command == 'cnots':
         cnot_generator.main(sys.argv[2:])
     if args.command == 'phasepoly':
-        phase_poly.main(sys.argv[2:])
+        phase_poly_generator.main(sys.argv[2:])
 
