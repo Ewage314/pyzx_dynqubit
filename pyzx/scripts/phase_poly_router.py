@@ -7,12 +7,15 @@ if __name__ == '__main__':
     print("Please call this as python -m pyzx phasepoly ...")
     exit()
 
-from ..routing.architecture import architectures, SQUARE, create_architecture, dynamic_size_architectures
+from ..routing.architecture import architectures, SQUARE, create_architecture, dynamic_size_architectures, FULLY_CONNNECTED
 from ..routing.cnot_mapper import STEINER_MODE, TKET_COMPILER, sequential_map_cnot_circuits, elim_modes, compiler_modes, GENETIC_STEINER_MODE, PSO_STEINER_MODE, GAUSS_MODE
 from ..routing.phase_poly import route_phase_poly, TKET_STEINER_MODE
 from ..utils import make_into_list, restricted_float
 from ..circuit import Circuit
-from ..routing.tket_router import pyzx_to_tk, OpType, route_tket
+from ..routing.tket_router import pyzx_to_tk, OpType, route_tket, tket_to_pyzx
+
+TKET_THEN_STEINER_MODE = "tket->steiner"
+PHASEPOLY_TKET_MODE = "phase_poly->tket"
 
 
 description = "Compiles given qasm files or those in the given folder to a given architecture."
@@ -20,7 +23,7 @@ description = "Compiles given qasm files or those in the given folder to a given
 import argparse
 parser = argparse.ArgumentParser(prog="pyzx phase poly", description=description)
 parser.add_argument("QASM_source", nargs='+', help="The QASM file or folder with QASM files to be routed.")
-parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=[TKET_COMPILER, STEINER_MODE, TKET_STEINER_MODE])
+parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=[TKET_COMPILER, STEINER_MODE, TKET_STEINER_MODE, TKET_THEN_STEINER_MODE, PHASEPOLY_TKET_MODE])
 parser.add_argument("-a", "--architecture", nargs='+', dest="architecture", default=SQUARE, choices=architectures, help="Which architecture it should run compile to.")
 parser.add_argument("-q", "--qubits", nargs='+', default=None, type=int, help="The number of qubits for the fully connected architecture.")
 #parser.add_argument("--population", nargs='+', default=10, type=int, help="The population size for the genetic algorithm.")
@@ -111,13 +114,21 @@ def map_phase_poly_circuits(sources, architecture, modes, **kwargs):
     modes = make_into_list(modes)
     circuits = [Circuit.from_qasm_file(f) for f in sources]
     all_results = []
+    full_connected = create_architecture(FULLY_CONNNECTED, n_qubits=architecture.n_qubits)
     for mode in modes:
         for i, circuit in enumerate(circuits):
             t = datetime.datetime.now()
-            if mode == TKET_COMPILER:
-                c = route_tket(circuit.copy(), architecture)
+            if mode == TKET_COMPILER or mode == TKET_THEN_STEINER_MODE:
+                a = architecture if mode == TKET_COMPILER else full_connected
+                c = route_tket(circuit.copy(), a)
+            elif mode == PHASEPOLY_TKET_MODE or mode == GAUSS_MODE:
+                c = route_phase_poly(circuit.copy(), architecture, GAUSS_MODE)
             else:
                 c = route_phase_poly(circuit.copy(), architecture, mode, n_steps=5, population=5)
+            if mode == PHASEPOLY_TKET_MODE:
+                c = route_tket(c.copy(), architecture)
+            elif mode == TKET_THEN_STEINER_MODE:
+                c = route_phase_poly(tket_to_pyzx(c), architecture, STEINER_MODE)
             t = datetime.datetime.now() - t
             results = get_metrics(c)
             results["time"] = t
@@ -126,7 +137,7 @@ def map_phase_poly_circuits(sources, architecture, modes, **kwargs):
             file = sources[i]
             match = re.search('/(\d+)layers(\d+)cnots', file)
             results["file"] = file
-            if match:
+            if match is not None:
                 results["#phase_layers"] = int(match.group(1))
                 results["#cnots_per_layer"] = int(match.group(2))
             else:

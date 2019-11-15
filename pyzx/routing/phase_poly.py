@@ -232,7 +232,7 @@ class PhasePoly():
     def _independent(self, partition):
         return inverse_hack(partition2mat2(partition)) is not None
 
-    def synthesize(self, mode, architecture, optimize_parity_order=True, optimize_partition_order=False, **kwargs):
+    def synthesize(self, mode, architecture, optimize_parity_order=False, optimize_partition_order=True, iterative_placement=False, parity_permutation=True, iterative_initial_placement=False, **kwargs):
         kwargs["full_reduce"] = True
         n_qubits = architecture.n_qubits if architecture is not None else len(self.out_par)
         # Partition and order the parities
@@ -259,29 +259,44 @@ class PhasePoly():
                 # Make the partial circuit
                 circuit = Circuit(n_qubits)
                 next_perm = current_perm
-                #next_perm = self._place_parities([[row[j] for j in current_perm] for row in other_matrices[idx].data])
-                permuted_matrices = [Mat2([[other_matrices[idx].data[k][l] for l in current_perm] for k in next_perm])]
-                if idx < len(other_matrices)-1:
-                    permuted_matrices += [Mat2([[m.data[k][l] for l in next_perm] for k in next_perm]) for m in other_matrices[idx+1:]]
-                temp_CNOT_circuits, _, _ = sequential_gauss(permuted_matrices, mode=GAUSS_MODE, architecture=architecture, full_reduce=True)
-                for c in temp_CNOT_circuits:
-                    for g in c.gates:
-                        circuit.add_gate(g)
-                # Get a better qubit placement from tket
-                tk_circuit = pyzx_to_tk(circuit)
-                new_perm = graph_placement(tk_circuit, arch)
-                # Parse the placement into a np.array permutation
-                perm_dict = {p[1].index[0]: p[0].index[0] for p in new_perm.items()} 
-                #suggestions.append((perm_dict, current_perm, next_perm, circuit.gates[:len(temp_CNOT_circuits[0].gates)]))
-                new_perm = [perm_dict[i] if i in perm_dict else None for i in range(n_qubits)]
-                perm_idx  = [i for i in range(n_qubits) if new_perm[i] is None]
-                perm_val = [i for i in range(n_qubits) if i not in new_perm]
-                for j, v in zip(perm_idx, perm_val):
-                    new_perm[j] = v
-                new_perm = np.asarray(new_perm)
-                if idx == 0:
-                    current_perm = current_perm[new_perm]
-                next_perm = next_perm[new_perm]
+                if parity_permutation:
+                    next_perm = self._place_parities([[row[j] for j in current_perm] for row in other_matrices[idx].data])
+                possible_perms = []
+                do_loop = True
+                n_gates = None
+                while do_loop and (next_perm.tolist() not in possible_perms) and (n_gates is None or len(circuit.gates) < n_gates):
+                    possible_perms.append(next_perm.tolist())
+                    n_gates = len(circuit.gates)
+                    if iterative_initial_placement:
+                        iterative_placement = False
+                    else:
+                        do_loop = False
+                    permuted_matrices = [Mat2([[other_matrices[idx].data[k][l] for l in current_perm] for k in next_perm])]
+                    if idx < len(other_matrices)-1:
+                        permuted_matrices += [Mat2([[m.data[k][l] for l in next_perm] for k in next_perm]) for m in other_matrices[idx+1:]]
+                    temp_CNOT_circuits, _, _ = sequential_gauss(permuted_matrices, mode=GAUSS_MODE, architecture=architecture, full_reduce=True)
+                    circuit = Circuit(n_qubits)
+                    for c in temp_CNOT_circuits:
+                        for g in c.gates:
+                            circuit.add_gate(g)
+                    if iterative_placement or idx == 0:
+                        # Get a better qubit placement from tket
+                        tk_circuit = pyzx_to_tk(circuit)
+                        new_perm = graph_placement(tk_circuit, arch)
+                        # Parse the placement into a np.array permutation
+                        perm_dict = {p[1].index[0]: p[0].index[0] for p in new_perm.items()} 
+                        #suggestions.append((perm_dict, current_perm, next_perm, circuit.gates[:len(temp_CNOT_circuits[0].gates)]))
+                        new_perm = [perm_dict[i] if i in perm_dict else None for i in range(n_qubits)]
+                        perm_idx  = [i for i in range(n_qubits) if new_perm[i] is None]
+                        perm_val = [i for i in range(n_qubits) if i not in new_perm]
+                        for j, v in zip(perm_idx, perm_val):
+                            new_perm[j] = v
+                        new_perm = np.asarray(new_perm)
+                    if idx == 0:
+                        current_perm = current_perm[new_perm]
+                    next_perm = next_perm[new_perm]
+                if iterative_initial_placement:
+                    next_perm = np.asarray(possible_perms[-1])
                 perms.append(current_perm)
                 current_perm = next_perm
             # Add the intitial permutation of the last CNOT block as final permutation of the full circuit
