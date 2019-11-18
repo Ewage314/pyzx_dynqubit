@@ -8,11 +8,12 @@ if __name__ == '__main__':
     exit()
 
 from ..routing.architecture import architectures, SQUARE, create_architecture, dynamic_size_architectures, FULLY_CONNNECTED
-from ..routing.cnot_mapper import STEINER_MODE, TKET_COMPILER, sequential_map_cnot_circuits, elim_modes, compiler_modes, GENETIC_STEINER_MODE, PSO_STEINER_MODE, GAUSS_MODE
+from ..routing.cnot_mapper import STEINER_MODE, TKET_COMPILER, sequential_map_cnot_circuits, elim_modes, compiler_modes, GENETIC_STEINER_MODE, PSO_STEINER_MODE, GAUSS_MODE, sequential_gauss
 from ..routing.phase_poly import route_phase_poly, TKET_STEINER_MODE
 from ..utils import make_into_list, restricted_float
-from ..circuit import Circuit
+from ..circuit import Circuit, ZPhase, CNOT
 from ..routing.tket_router import pyzx_to_tk, OpType, route_tket, tket_to_pyzx
+from ..parity_maps import CNOT_tracker
 
 TKET_THEN_STEINER_MODE = "tket->steiner"
 PHASEPOLY_TKET_MODE = "phase_poly->tket"
@@ -128,7 +129,15 @@ def map_phase_poly_circuits(sources, architecture, modes, **kwargs):
             if mode == PHASEPOLY_TKET_MODE:
                 c = route_tket(c.copy(), architecture)
             elif mode == TKET_THEN_STEINER_MODE:
-                c = route_phase_poly(tket_to_pyzx(c), architecture, STEINER_MODE)
+                # TODO split the circuit c into CNOT sections and route that sequential steiner gauss
+                matrices, phases = zip(*tket_to_cnots(c))
+                circuits, _, _ = sequential_gauss([m.copy() for m in matrices], mode=STEINER_MODE, architecture=architecture, full_reduce=True)
+                c = Circuit(architecture.n_qubits)
+                for circuit, p in zip(circuits, phases):
+                    for gate in circuit.gates:
+                        c.add_gate(gate)
+                    for phase in p:
+                        c.add_gate(phase)
             t = datetime.datetime.now() - t
             results = get_metrics(c)
             results["time"] = t
@@ -161,3 +170,21 @@ def get_metrics(circuit):
     metrics["Rz depth"] = tk_circuit.depth_by_type(OpType.Rz)
     metrics["# Rz"] = tk_circuit.n_gates_of_type(OpType.Rz)
     return DataFrame([metrics])
+
+def tket_to_cnots(circuit):
+    cnots = CNOT_tracker(circuit.n_qubits)
+    phases = []
+    split_gates = []
+    for gate in circuit.get_commands():
+        if gate.op.get_type() == OpType.Rz:
+            phases.append(ZPhase(gate.qubits[0].index[0], gate.op.get_params()[0]))
+        elif gate.op.get_type() == OpType.CX:
+            if phases != []:   
+                split_gates.append((cnots.matrix, phases))
+                cnots = CNOT_tracker(circuit.n_qubits)
+                phases = []             
+            cnots.add_gate(CNOT(gate.qubits[0].index[0], gate.qubits[1].index[0]))
+        else:
+            print("Warning: gate not supported, skipping", gate)
+    split_gates.append((cnots.matrix, phases))
+    return split_gates
