@@ -24,7 +24,7 @@ description = "Compiles given qasm files or those in the given folder to a given
 import argparse
 parser = argparse.ArgumentParser(prog="pyzx phase poly", description=description)
 parser.add_argument("QASM_source", nargs='+', help="The QASM file or folder with QASM files to be routed.")
-parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=[TKET_COMPILER, STEINER_MODE, TKET_STEINER_MODE, TKET_THEN_STEINER_MODE, PHASEPOLY_TKET_MODE])
+parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=[TKET_COMPILER, STEINER_MODE, TKET_STEINER_MODE, TKET_THEN_STEINER_MODE, PHASEPOLY_TKET_MODE, GAUSS_MODE])
 parser.add_argument("-a", "--architecture", nargs='+', dest="architecture", default=SQUARE, choices=architectures, help="Which architecture it should run compile to.")
 parser.add_argument("-q", "--qubits", nargs='+', default=None, type=int, help="The number of qubits for the fully connected architecture.")
 #parser.add_argument("--population", nargs='+', default=10, type=int, help="The population size for the genetic algorithm.")
@@ -36,6 +36,7 @@ parser.add_argument("-q", "--qubits", nargs='+', default=None, type=int, help="T
 parser.add_argument("--metrics_csv", default=None, help="The location to store compiling metrics as csv, if not given, the metrics are printed.")
 #parser.add_argument("--n_compile", default=1, type=int, help="How often to run the Quilc compiler, since it is not deterministic.")
 parser.add_argument("--subfolder", default=None, type=str, nargs="+", help="Possible subfolders from the main QASM source to compile from. Less typing when source folders are in the same folder. Can also be used for subfiles.")
+parser.add_argument("--raw", default=False, type=bool, help="Whether the results should be raw or aggregated with mean/median/min/max")
 parser.add_argument("--notes", default="", type=str, help="Extra notes that can be added to the csv")
 #parser.add_argument("-n", "--n_circuits", nargs='+', dest="n", default=20, type=int, help="The number of circuits to generate.")
 #parser.add_argument("-p", "--n_phase_layers", nargs='+', dest="phase_layers", default=1, type=int, help="Number of layers with phases in the circuits to be generated.")
@@ -91,12 +92,16 @@ def main(args):
             archs = [create_architecture(a)]
         for architecture in archs:
             results_df = map_phase_poly_circuits(sources, architecture, mode)
-            kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
-            results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), results_df.median(**kwargs).add_suffix("_median"), results_df.min(**kwargs).add_suffix("_min"), results_df.max(**kwargs).add_suffix("_max")], axis=1)
-            #results_df["# phase layers"] = n_phase_layers
-            #results_df["# cnots per layer"] = n_cnots_per_layer
-            #results_df["architecture"] = architecture.name
-            #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
+            if not args.raw:
+                kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
+                results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 
+                                    results_df.median(**kwargs).add_suffix("_median"), 
+                                    results_df.min(**kwargs).add_suffix("_min"), 
+                                    results_df.max(**kwargs).add_suffix("_max")], axis=1)
+                #results_df["# phase layers"] = n_phase_layers
+                #results_df["# cnots per layer"] = n_cnots_per_layer
+                #results_df["architecture"] = architecture.name
+                #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
             results_df["notes"] = args.notes 
             all_results.append(results_df)
         if args.metrics_csv and all_results != []:
@@ -127,7 +132,7 @@ def map_phase_poly_circuits(sources, architecture, modes, **kwargs):
             else:
                 c = route_phase_poly(circuit.copy(), architecture, mode, n_steps=5, population=5)
             if mode == PHASEPOLY_TKET_MODE:
-                c = route_tket(c.copy(), architecture)
+                c = route_tket(c.copy(), architecture, initial_mapping=[i for i in range(architecture.n_qubits)])
             elif mode == TKET_THEN_STEINER_MODE:
                 # TODO split the circuit c into CNOT sections and route that sequential steiner gauss
                 matrices, phases = zip(*tket_to_cnots(c))
@@ -139,6 +144,7 @@ def map_phase_poly_circuits(sources, architecture, modes, **kwargs):
                     for phase in p:
                         c.add_gate(phase)
             t = datetime.datetime.now() - t
+            original_CNOTs = get_metrics(circuit).add_prefix("Original ")
             results = get_metrics(c)
             results["time"] = t
             results["idx"] = i
@@ -152,6 +158,7 @@ def map_phase_poly_circuits(sources, architecture, modes, **kwargs):
             else:
                 results["#phase_layers"] = None
                 results["#cnots_per_layer"] = None
+            results = results.join(original_CNOTs)
             results.set_index(["#phase_layers", "#cnots_per_layer"], inplace=True)
             all_results.append(results)
             #print("done", i)

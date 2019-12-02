@@ -129,6 +129,8 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
         #c0 = permutation[c0]
         #c1 = permutation[c1]
         debug and print("Reducing", c0, c1)
+        c0 = architecture.qubit_map[c0]
+        c1 = architecture.qubit_map[c1]
         if x != None: x.row_add(c0, c1)
         if y != None: y.col_add(c1, c0)
     def steiner_reduce(col, root, nodes, usable_nodes, rec_nodes, upper):

@@ -148,7 +148,7 @@ class StepFunction():
         return new_perms[-1], (circs, perms), score
 
 
-def gauss(mode, matrix, architecture=None, permutation=None, **kwargs):
+def gauss(mode, matrix, architecture=None, permutation=None, try_transpose=False, **kwargs):
     """
     Performs gaussian elimination of type mode on Mat2 matrix on the given architecture, if needed.
 
@@ -158,6 +158,10 @@ def gauss(mode, matrix, architecture=None, permutation=None, **kwargs):
     :param kwargs: Other arguments that can be given to the Mat2.gauss() function or parameters for the genetic algorithm.
     :return: The rank of the matrix. Mat2 matrix is transformed.
     """
+    if try_transpose:
+        matrix = matrix.transpose()
+        architecture = architecture.transpose()
+
     if mode == GAUSS_MODE:
         # TODO - adjust to get the right gate locations for the given permutation.
         
@@ -176,26 +180,30 @@ def gauss(mode, matrix, architecture=None, permutation=None, **kwargs):
             kwargs["x"] = x
             kwargs["y"] = None
             rank = matrix.gauss(**kwargs)
-            for gate in x.gates:
-                #c = permutation[gate.control]
-                #t = permutation[gate.target]
-                if old_x != None: old_x.row_add(c, t)
-                if old_y != None: old_y.col_add(t, c)
-            return rank
+            #for gate in x.gates:
+            #    #c = permutation[gate.control]
+            #    #t = permutation[gate.target]
+            #    if old_x != None: old_x.row_add(c, t)
+            #    if old_y != None: old_y.col_add(t, c)
+            #return rank
         else:
-            return matrix.gauss(**kwargs)
+            rank = matrix.gauss(**kwargs)
     elif mode == STEINER_MODE:
         if architecture is None:
             print(
                 "\033[91m Warning: Architecture is not given, assuming fully connected architecture of size matrix.shape[0]. \033[0m ")
             architecture = create_fully_connected_architecture(len(matrix.data))
-        return steiner_gauss(matrix, architecture, permutation=permutation, **kwargs)
+        rank =  steiner_gauss(matrix, architecture, permutation=permutation, **kwargs)
     elif mode == GENETIC_STEINER_MODE:
         perm, circuit, rank = permutated_gauss(matrix, STEINER_MODE, architecture=architecture, permutation=permutation, **kwargs)
-        return rank
+        #return rank
     elif mode == GENETIC_GAUSS_MODE:
         perm, circuit, rank = permutated_gauss(matrix, GAUSS_MODE, architecture=architecture, permutation=permutation, **kwargs)
-        return rank
+    if try_transpose:
+        # TODO - fix x and y circuits... - Needed? 
+        # TODO pick which gauss version was chosen
+        pass
+    return rank
 
 def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, crossover_prob=0.8, mutate_prob=0.2, n_iterations=5,
                      row=True, col=True, full_reduce=True, fitness_func=None, x=None, y=None, n_threads=None, **kwargs):

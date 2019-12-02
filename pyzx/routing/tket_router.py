@@ -1,14 +1,20 @@
 from pytket.pyzx import pyzx_to_tk, tk_to_pyzx
-from pytket._routing import route, Architecture, graph_placement
+from pytket._routing import route, Architecture, graph_placement, QubitMap
 from pytket._transform import Transform
-from pytket import OpType
+from pytket import OpType, UnitID
 
 from ..circuit import Circuit, ZPhase, CNOT
 
-def route_tket(circuit, architecture):
+def route_tket(circuit, architecture, initial_mapping=None):
     tk_circuit = pyzx_to_tk(circuit)
     arch = get_tk_architecture(architecture)
-    outcirc = route(tk_circuit, arch)
+    if initial_mapping is None:
+        outcirc = route(tk_circuit, arch)
+    else:
+        qmap = QubitMap()
+        for i, j in enumerate(initial_mapping):
+            qmap[UnitID('q', i)] = UnitID('flatnode', j) # TODO make flatnode into node once pytket is updated to 0.4
+        outcirc = route(tk_circuit, arch, initial_map=qmap)
     Transform.DecomposeSWAPtoCX().apply(outcirc)
     #outcirc.decompose_SWAP_to_CX()
     return outcirc
