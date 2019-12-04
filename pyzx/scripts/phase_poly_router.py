@@ -38,6 +38,7 @@ parser.add_argument("--metrics_csv", default=None, help="The location to store c
 parser.add_argument("--subfolder", default=None, type=str, nargs="+", help="Possible subfolders from the main QASM source to compile from. Less typing when source folders are in the same folder. Can also be used for subfiles.")
 parser.add_argument("--raw", default=False, type=bool, help="Whether the results should be raw or aggregated with mean/median/min/max")
 parser.add_argument("--notes", default="", type=str, help="Extra notes that can be added to the csv")
+parser.add_argument("--placement", default=True, type=bool, help="Whether tket should optimize placement")
 #parser.add_argument("-n", "--n_circuits", nargs='+', dest="n", default=20, type=int, help="The number of circuits to generate.")
 #parser.add_argument("-p", "--n_phase_layers", nargs='+', dest="phase_layers", default=1, type=int, help="Number of layers with phases in the circuits to be generated.")
 #parser.add_argument("-c", "--cnots_between_layers", nargs='+', dest="cnots", default=5, type=int, help="Number of CNOT gates between each phase layer in the circuits to be generated.")
@@ -116,23 +117,24 @@ def main(args):
         print(concat(all_results))
          
 
-def map_phase_poly_circuits(sources, architecture, modes, **kwargs):
+def map_phase_poly_circuits(sources, architecture, modes, placement=True, **kwargs):
     modes = make_into_list(modes)
     circuits = [Circuit.from_qasm_file(f) for f in sources]
     all_results = []
     full_connected = create_architecture(FULLY_CONNNECTED, n_qubits=architecture.n_qubits)
+    tket_initial_mapping = None if placement else [i for i in range(architecture.n_qubits)]
     for mode in modes:
         for i, circuit in enumerate(circuits):
             t = datetime.datetime.now()
             if mode == TKET_COMPILER or mode == TKET_THEN_STEINER_MODE:
                 a = architecture if mode == TKET_COMPILER else full_connected
-                c = route_tket(circuit.copy(), a)
+                c = route_tket(circuit.copy(), a, initial_mapping=tket_initial_mapping)
             elif mode == PHASEPOLY_TKET_MODE or mode == GAUSS_MODE:
                 c = route_phase_poly(circuit.copy(), architecture, GAUSS_MODE)
             else:
                 c = route_phase_poly(circuit.copy(), architecture, mode, n_steps=5, population=5)
             if mode == PHASEPOLY_TKET_MODE:
-                c = route_tket(c.copy(), architecture, initial_mapping=[i for i in range(architecture.n_qubits)])
+                c = route_tket(c.copy(), architecture, initial_mapping=tket_initial_mapping)
             elif mode == TKET_THEN_STEINER_MODE:
                 # TODO split the circuit c into CNOT sections and route that sequential steiner gauss
                 matrices, phases = zip(*tket_to_cnots(c))
