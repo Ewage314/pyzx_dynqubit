@@ -23,14 +23,16 @@ from ..circuit import Circuit, ZPhase, Fraction, HAD, XPhase, CNOT
 from ..parity_maps import build_random_parity_map, CNOT_tracker
 from ..graph.graph import  Graph
 from ..linalg import Mat2
-from ..routing.cnot_mapper import sequential_gauss, GAUSS_MODE, STEINER_MODE, TKET_COMPILER
+from ..routing.cnot_mapper import sequential_gauss, GAUSS_MODE, STEINER_MODE, TKET_COMPILER, gauss
 from ..routing.tket_router import get_tk_architecture, pyzx_to_tk, graph_placement
+from ..routing.steiner import steiner_reduce_column
+from ..routing.architecture import create_architecture, FULLY_CONNNECTED
 
 TKET_STEINER_MODE = "tket-steiner"
         
 def route_phase_poly(circuit, architecture, mode, **kwargs):
     phase_poly = PhasePoly.fromCircuit(circuit)
-    new_circuit = phase_poly.synthesize(mode, architecture, **kwargs)[0]
+    new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
     return new_circuit
 
 def make_random_phase_poly(n_qubits, n_phase_layers, cnots_per_layer, return_circuit=False):
@@ -232,7 +234,7 @@ class PhasePoly():
     def _independent(self, partition):
         return inverse_hack(partition2mat2(partition)) is not None
 
-    def synthesize(self, mode, architecture, optimize_parity_order=False, optimize_partition_order=True, iterative_placement=False, parity_permutation=True, iterative_initial_placement=False, **kwargs):
+    def matroid_synth(self, mode, architecture, optimize_parity_order=False, optimize_partition_order=True, iterative_placement=False, parity_permutation=True, iterative_initial_placement=False, **kwargs):
         kwargs["full_reduce"] = True
         n_qubits = architecture.n_qubits if architecture is not None else len(self.out_par)
         # Partition and order the parities
@@ -330,6 +332,68 @@ class PhasePoly():
                     circuit.add_gate(gate)
         return circuit, perms[0], perms[-1]
 
+    def gray_synth(self, mode, architecture, **kwargs):
+        kwargs["full_reduce"] = True
+        if architecture is None or GAUSS_MODE in mode:
+            architecture = create_architecture(FULLY_CONNNECTED, n_qubits=len(self.out_par[0]))
+            mode = GAUSS_MODE
+        else:
+            mode = GAUSS_MODE if GAUSS_MODE in mode else STEINER_MODE
+        # Obtain the parities
+        parities_to_reach = self.all_parities
+        # TODO - Pick a good order
+        # Make a matrix from the parities
+        matrix = Mat2([[int(parity[i]) for parity in parities_to_reach] for i in range(architecture.n_qubits)] )
+        circuit = CNOT_tracker(architecture.n_qubits)
+        # For each column in the matrix Or while the matrix has columns
+        cols_to_skip = []
+        n_phases_placed = 0
+        for col in [c for c in range(matrix.cols()) if c not in cols_to_skip]:
+            if sum([row[col] for row in matrix.data]) == 1:
+                # Add phase gates where needed
+                qubit = [row[col] for row in matrix.data].index(1)
+                circuit.add_gate(ZPhase(qubit, self.zphases[parities_to_reach[col]]))
+                n_phases_placed += 1
+                # Remove columns from the matrix if the corresponding parity was obtained
+                cols_to_skip.append(col)
+        for c in range(matrix.cols()):
+            if c not in cols_to_skip:
+                column = [row[c] for row in matrix.data]
+                # TODO - Pick a good qubit where the phase should be placed
+                root = column.index(1) # Place the parity on the first qubit that has a 1
+                # Steiner extract with that qubit as root
+                nodes = [i for i in range(architecture.n_qubits) if column[i] == 1]
+                cnots = list(steiner_reduce_column(architecture, column, root, nodes, [i for i in range(architecture.n_qubits)], [], upper=True))
+                # For each returned CNOT:
+                for target, control in cnots:
+                    # Place the CNOT on the circuit
+                    circuit.add_gate(CNOT(control, target))
+                    # Adjust the matrix accordingly - reversed elementary row operations
+                    matrix.row_add(target, control)
+                    # Keep track of the parities in the circuit - normal elementary row operations
+                    for col in [c for c in range(matrix.cols()) if c not in cols_to_skip]:
+                        if sum([row[col] for row in matrix.data]) == 1:
+                            # Add phase gates where needed
+                            qubit = [row[col] for row in matrix.data].index(1)
+                            circuit.add_gate(ZPhase(qubit, self.zphases[parities_to_reach[col]]))
+                            n_phases_placed += 1
+                            # Remove columns from the matrix if the corresponding parity was obtained
+                            cols_to_skip.append(col)    
+        # Calculate the final parity that needs to be added from the circuit and self.out_par
+        current_parities = circuit.matrix
+        output_parities = Mat2([[int(v) for v in row] for row in self.out_par])
+        last_parities = output_parities*current_parities.inverse()
+        # Do steiner-gauss to calculate necessary CNOTs and add those to the circuit.
+        cnots = CNOT_tracker(architecture.n_qubits)
+        gauss(mode, last_parities, architecture, y=cnots, **kwargs) # TODO - check if this works.
+        for cnot in cnots.gates:
+            circuit.add_gate(cnot)
+        # Return the circuit
+        return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
+
+            
+
+
 def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwargs):
     """
     Broken!
@@ -343,7 +407,7 @@ def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwarg
         if gate.name == "HAD":
             # Deal with the phase polynomial that came before
             phase_poly = PhasePoly.fromCircuit(c, initial_qubit_placement=current_perm)
-            new_circ, in_perm, out_perm = phase_poly.synthesize(mode, architecture, input_perm=input_perm, output_perm=output_perm, **kwargs)
+            new_circ, in_perm, out_perm = phase_poly.matroid_synth(mode, architecture, input_perm=input_perm, output_perm=output_perm, **kwargs)
             # Store the initial permutation
             if input_perm:
                 initial_perm = in_perm
@@ -362,7 +426,7 @@ def tpar(circuit, mode, architecture, input_perm=True, output_perm=True, **kwarg
         else:
             c.add_gate(gate)
     phase_poly = PhasePoly.fromCircuit(c)
-    new_circ, in_perm, out_perm = phase_poly.synthesize(mode, architecture, input_perm=input_perm, output_perm=output_perm, **kwargs)
+    new_circ, in_perm, out_perm = phase_poly.matroid_synth(mode, architecture, input_perm=input_perm, output_perm=output_perm, **kwargs)
     # Store the initial permutation
     if input_perm:
         initial_perm = in_perm

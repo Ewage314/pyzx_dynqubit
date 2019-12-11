@@ -54,7 +54,8 @@ class CNOT_tracker(Circuit):
     def add_gate(self, gate, *args, **kwargs):
         if isinstance(gate, CNOT):
             self.row_add(gate.control, gate.target)
-        super().add_gate(gate, *args, **kwargs)
+        else:
+            super().add_gate(gate, *args, **kwargs)
 
     def col_add(self, q0, q1):
         self.prepend_gate("CNOT", q1, q0)

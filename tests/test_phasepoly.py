@@ -244,17 +244,19 @@ class TestPhasePoly(unittest.TestCase):
     
     def do_phase_poly(self, circuit, mode, architecture, routed=False, tensor_compare=False):
         phase_poly = PhasePoly.fromCircuit(circuit)
-        # Check the synthesized circuit
-        new_circuit, initial_perm, output_perm = phase_poly.synthesize(mode=mode, architecture=architecture, full_reduce=True)
-        if routed:
-            self.assertGates(new_circuit)
-        adjusted_circuit = self.apply_perms(new_circuit, initial_perm, output_perm)
-        new_phase_poly = PhasePoly.fromCircuit(adjusted_circuit)
-        # Check if the phasepolys are the same
-        self.assertPhasePolyEqual(phase_poly, new_phase_poly)
-        self.assertFinalParityEqual(circuit, adjusted_circuit)
-        # Check if the circuits are the same
-        self.assertCircuitEquivalent(adjusted_circuit, circuit)
+        for func in [phase_poly.matroid_synth, phase_poly.gray_synth]:
+            with self.subTest(i=func):
+                # Check the synthesized circuit
+                new_circuit, initial_perm, output_perm = func(mode=mode, architecture=architecture, full_reduce=True)
+                if routed:
+                    self.assertGates(new_circuit)
+                adjusted_circuit = self.apply_perms(new_circuit, initial_perm, output_perm)
+                new_phase_poly = PhasePoly.fromCircuit(adjusted_circuit)
+                # Check if the phasepolys are the same
+                self.assertPhasePolyEqual(phase_poly, new_phase_poly)
+                self.assertFinalParityEqual(circuit, adjusted_circuit)
+                # Check if the circuits are the same
+                self.assertCircuitEquivalent(adjusted_circuit, circuit)
         
     def test_tensor_compare(self):
         n_qubits = 3
@@ -293,8 +295,8 @@ class TestPhasePoly(unittest.TestCase):
                 phase_poly = PhasePoly.fromCircuit(circuit.copy())
                 phase_poly2 = PhasePoly.fromCircuit(circuit.copy())
                 self.assertPhasePolyEqual(phase_poly, phase_poly2)
-                c1, in1, out1 = phase_poly.synthesize(STEINER_MODE, self.architecture, full_reduce=True)
-                c2, in2, out2 = phase_poly2.synthesize("tket-steiner", self.architecture, full_reduce=True)
+                c1, in1, out1 = phase_poly.matroid_synth(STEINER_MODE, self.architecture, full_reduce=True)
+                c2, in2, out2 = phase_poly2.matroid_synth("tket-steiner", self.architecture, full_reduce=True)
                 new_c1 = self.apply_perms(c1, in1, out1)
                 new_c2 = self.apply_perms(c2, in2, out2)
                 self.assertCircuitEquivalent(circuit, new_c1)

@@ -134,41 +134,11 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
         if x != None: x.row_add(c0, c1)
         if y != None: y.col_add(c1, c0)
     def steiner_reduce(col, root, nodes, usable_nodes, rec_nodes, upper):
-        steiner_tree = architecture.rec_steiner_tree(root, nodes, usable_nodes, rec_nodes, upper)
-        # Remove all zeros
-        next_check = next(steiner_tree)
-        debug and print("Step 1: remove zeros")
-        if upper:
-            zeros = []
-            while next_check is not None:
-                s0, s1 = next_check
-                if matrix.data[s0][col] == 0:  # s1 is a new steiner point or root = 0
-                    zeros.append(next_check)
-                next_check = next(steiner_tree)
-            while len(zeros) > 0:
-                s0, s1 = zeros.pop(-1)
-                if matrix.data[s0][col] == 0:
-                    row_add(s1, s0)
-                    debug and print(matrix.data[s0][col], matrix.data[s1][col])
-        else:
-            debug and print("deal with zero root")
-            if next_check is not None and matrix.data[next_check[0]][col] == 0:  # root is zero
-                print("WARNING : Root is 0 => reducing non-pivot column", matrix.data)
-            debug and print("Step 1: remove zeros", [r[col] for r in matrix.data])
-            while next_check is not None:
-                s0, s1 = next_check
-                if matrix.data[s1][col] == 0:  # s1 is a new steiner point
-                    row_add(s0, s1)
-                next_check = next(steiner_tree)
-        # Reduce stuff
-        debug and print("Step 2: remove ones")
-        next_add = next(steiner_tree)
-        while next_add is not None:
-            s0, s1 = next_add
-            row_add(s0, s1)
-            next_add = next(steiner_tree)
-            debug and print(next_add)
-        debug and print("Step 3: profit")
+        generator = steiner_reduce_column(architecture, [row[col] for row in matrix.data], root, nodes, usable_nodes, rec_nodes, upper)
+        cnot = next(generator, None)
+        while cnot is not None:
+            row_add(*cnot)
+            cnot = next(generator, None)
     def rec_step(cols, rows):
         size = len(rows)
         # Upper triangular form uses the same structure.
@@ -203,3 +173,43 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
     qubit_order = architecture.reduce_order
     rec_step(qubit_order, list(reversed(qubit_order)))
     
+
+def steiner_reduce_column(architecture, col, root, nodes, usable_nodes, rec_nodes, upper):
+    steiner_tree = architecture.rec_steiner_tree(root, nodes, usable_nodes, rec_nodes, upper)
+    # Remove all zeros
+    next_check = next(steiner_tree)
+    debug and print("Step 1: remove zeros")
+    if upper:
+        zeros = []
+        while next_check is not None:
+            s0, s1 = next_check
+            if col[s0] == 0:  # s1 is a new steiner point or root = 0
+                zeros.append(next_check)
+            next_check = next(steiner_tree)
+        while len(zeros) > 0:
+            s0, s1 = zeros.pop(-1)
+            if col[s0] == 0:
+                col[s0] = (col[s1]+col[s0])%2
+                yield s1, s0
+                debug and print(col[s0], col[s1])
+    else:
+        debug and print("deal with zero root")
+        if next_check is not None and col[next_check[0]] == 0:  # root is zero
+            print("WARNING : Root is 0 => reducing non-pivot column", col)
+        debug and print("Step 1: remove zeros", col)
+        while next_check is not None:
+            s0, s1 = next_check
+            if col[s1] == 0:  # s1 is a new steiner point
+                col[s1] = (col[s1]+col[s0])%2
+                yield s0, s1
+            next_check = next(steiner_tree)
+    # Reduce stuff
+    debug and print("Step 2: remove ones")
+    next_add = next(steiner_tree)
+    while next_add is not None:
+        s0, s1 = next_add
+        col[s1] = (col[s1]+col[s0])%2
+        yield s0, s1
+        next_add = next(steiner_tree)
+        debug and print(next_add)
+    debug and print("Step 3: profit")
