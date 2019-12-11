@@ -39,6 +39,7 @@ parser.add_argument("--subfolder", default=None, type=str, nargs="+", help="Poss
 parser.add_argument("--raw", default=False, type=bool, help="Whether the results should be raw or aggregated with mean/median/min/max")
 parser.add_argument("--notes", default="", type=str, help="Extra notes that can be added to the csv")
 parser.add_argument("--placement", default=True, type=bool, help="Whether tket should optimize placement")
+parser.add_argument("--matroid", default=False, type=bool, help="Whether the algorithm should use matroid partitioning for synthesis, otherwise it uses gray synth.")
 #parser.add_argument("-n", "--n_circuits", nargs='+', dest="n", default=20, type=int, help="The number of circuits to generate.")
 #parser.add_argument("-p", "--n_phase_layers", nargs='+', dest="phase_layers", default=1, type=int, help="Number of layers with phases in the circuits to be generated.")
 #parser.add_argument("-c", "--cnots_between_layers", nargs='+', dest="cnots", default=5, type=int, help="Number of CNOT gates between each phase layer in the circuits to be generated.")
@@ -92,7 +93,7 @@ def main(args):
         else:
             archs = [create_architecture(a)]
         for architecture in archs:
-            results_df = map_phase_poly_circuits(sources, architecture, mode)
+            results_df = map_phase_poly_circuits(sources, architecture, mode, do_matroid=args.matroid)
             if not args.raw:
                 kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
                 results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 

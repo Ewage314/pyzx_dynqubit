@@ -30,9 +30,12 @@ from ..routing.architecture import create_architecture, FULLY_CONNNECTED
 
 TKET_STEINER_MODE = "tket-steiner"
         
-def route_phase_poly(circuit, architecture, mode, **kwargs):
+def route_phase_poly(circuit, architecture, mode, do_matroid=False, **kwargs):
     phase_poly = PhasePoly.fromCircuit(circuit)
-    new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
+    if do_matroid:
+        new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
+    else:
+        new_circuit = phase_poly.gray_synth(mode, architecture, **kwargs)[0]
     return new_circuit
 
 def make_random_phase_poly(n_qubits, n_phase_layers, cnots_per_layer, return_circuit=False):
