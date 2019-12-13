@@ -394,6 +394,84 @@ class PhasePoly():
         # Return the circuit
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
+    def rec_gray_synth(self, mode, architecture, **kwargs):
+        kwargs["full_reduce"] = True
+        if architecture is None or GAUSS_MODE in mode:
+            architecture = create_architecture(FULLY_CONNNECTED, n_qubits=len(self.out_par[0]))
+            mode = GAUSS_MODE
+        else:
+            mode = GAUSS_MODE if GAUSS_MODE in mode else STEINER_MODE
+        n_qubits = architecture.n_qubits
+        # Obtain the parities
+        parities_to_reach = self.all_parities
+        # Make a matrix from the parities
+        matrix = Mat2([[int(parity[i]) for parity in parities_to_reach] for i in range(architecture.n_qubits)] )
+        circuit = CNOT_tracker(architecture.n_qubits)
+        # Make a stack - aka use the python stack ^.^
+        def recurse(cols_to_use, qubits_to_use, phase_qubit): # Arguments from the original paper, steiner version might only use the first
+            # Check for finished columns
+            for col in [c for c in range(matrix.cols()) if c in cols_to_use]:
+                if sum([row[col] for row in matrix.data]) == 1:
+                    # Add phase gates where needed
+                    qubit = [row[col] for row in matrix.data].index(1)
+                    circuit.add_gate(ZPhase(qubit, self.zphases[parities_to_reach[col]]))
+                    # Remove columns from the matrix if the corresponding parity was obtained
+                    cols_to_use.remove(col) 
+            if cols_to_use != []:   
+                # Find all qubits (rows) with only 1s on the allowed parities (cols_to_use) 
+                qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) == len(cols_to_use)]
+                if len(qubits) > 1:
+                    # Pick the column with the most 1s to extrac the steiner tree with
+                    column = max(cols_to_use, key=lambda c: sum([row[c] for row in matrix.data]))
+                    # TODO - pick a qubit as root
+                    root = qubits[0]
+                    # build a steiner tree
+                    # Steiner extract with that qubit as root
+                    cnots = list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
+                    # For each returned CNOT:
+                    for target, control in cnots:
+                        # Place the CNOT on the circuit
+                        circuit.add_gate(CNOT(control, target))
+                        # Adjust the matrix accordingly - reversed elementary row operations
+                        matrix.row_add(target, control)
+                        # Keep track of the parities in the circuit - normal elementary row operations
+                        for col in [c for c in range(matrix.cols()) if c in cols_to_use]:
+                            if sum([row[col] for row in matrix.data]) == 1:
+                                # Add phase gates where needed
+                                qubit = [row[col] for row in matrix.data].index(1)
+                                circuit.add_gate(ZPhase(qubit, self.zphases[parities_to_reach[col]]))
+                                # Remove columns from the matrix if the corresponding parity was obtained
+                                cols_to_use.remove(col)    
+                # After placing the cnots do recursion
+                if len(cols_to_use) < 2:
+                    recurse(cols_to_use, qubits_to_use, phase_qubit)
+                else:
+                    # Choose a row to split on
+                    # Ignore rows that are currently all 0s or all 1s
+                    qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) not in [0, len(cols_to_use)]]
+                    # TODO - pick the one with the best connectivity everywhere
+                    chosen_row = qubits[0]
+                    # Split the column into 1s and 0s in that row
+                    cols1 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 1]
+                    cols0 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 0]
+                    # Recurse on the 1s
+                    recurse(cols1, qubits_to_use, phase_qubit)
+                    # Recurse on the 0s
+                    recurse(cols0, qubits_to_use, phase_qubit)
+        # Put the base case into the python stack
+        recurse([i for i in range(len(parities_to_reach))], [i for i in range(n_qubits)], None)
+        # Calculate the final parity that needs to be added from the circuit and self.out_par
+        current_parities = circuit.matrix
+        output_parities = Mat2([[int(v) for v in row] for row in self.out_par])
+        last_parities = output_parities*current_parities.inverse()
+        # Do steiner-gauss to calculate necessary CNOTs and add those to the circuit.
+        cnots = CNOT_tracker(architecture.n_qubits)
+        gauss(mode, last_parities, architecture, y=cnots, **kwargs) # TODO - check if this works.
+        for cnot in cnots.gates:
+            circuit.add_gate(cnot)
+        # Return the circuit
+        return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
+
             
 
 
