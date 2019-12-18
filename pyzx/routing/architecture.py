@@ -73,6 +73,8 @@ class Architecture():
             self.qubit_map = [i for i, v in enumerate(self.vertices)]
         self.n_qubits = len(self.vertices)
         self.reduce_order = reduce_order if reduce_order is not None else [i-1 for i in range(self.n_qubits, 0,-1)]
+        self.arities = [(i, len([edge for edge in self.graph.edges() if edge[0] == v])) for i,v in enumerate(self.vertices)]
+        self.arities.sort(key=lambda p: p[1], reverse=True)
 
     def pre_calc_distances(self):
         self.distances = {"upper": [self.floyd_warshall(until, upper=True) for until, v in enumerate(self.vertices)],

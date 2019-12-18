@@ -407,7 +407,7 @@ class PhasePoly():
         # Make a matrix from the parities
         matrix = Mat2([[int(parity[i]) for parity in parities_to_reach] for i in range(architecture.n_qubits)] )
         circuit = CNOT_tracker(architecture.n_qubits)
-        # Make a stack - aka use the python stack ^.^
+        # Make a stack - aka use the python stack >^.^<
         def recurse(cols_to_use, qubits_to_use, phase_qubit): # Arguments from the original paper, steiner version might only use the first
             # Check for finished columns
             for col in [c for c in range(matrix.cols()) if c in cols_to_use]:
@@ -423,11 +423,15 @@ class PhasePoly():
                 if len(qubits) > 1:
                     # Pick the column with the most 1s to extrac the steiner tree with
                     column = max(cols_to_use, key=lambda c: sum([row[c] for row in matrix.data]))
-                    # TODO - pick a qubit as root
-                    root = qubits[0]
-                    # build a steiner tree
-                    # Steiner extract with that qubit as root
-                    cnots = list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
+                    # Pick a qubit as root
+                    # TODO - something more efficient than exhaustive search
+                    cnots = None
+                    for root in qubits:        
+                        # build a steiner tree
+                        # Steiner extract with that qubit as root
+                        possible_cnots = list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
+                        if cnots is None or len(possible_cnots) < len(cnots):
+                            cnots = possible_cnots
                     # For each returned CNOT:
                     for target, control in cnots:
                         # Place the CNOT on the circuit
@@ -449,8 +453,17 @@ class PhasePoly():
                     # Choose a row to split on
                     # Ignore rows that are currently all 0s or all 1s
                     qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) not in [0, len(cols_to_use)]]
-                    # TODO - pick the one with the best connectivity everywhere
-                    chosen_row = qubits[0]
+                    # Pick the one with the best connectivity everywhere
+                    # TODO - add better heuristics and a method of switching
+                    iterator = ((qubit, arity) for qubit,arity in architecture.arities if qubit in qubits)
+                    q, a = next(iterator)
+                    best_qubits = []
+                    best_arity = a
+                    while a == best_arity:
+                        best_qubits.append(q)
+                        q, a = next(iterator, (None, best_arity-1))
+                    # Pick the qubit where the recursion split will be most skewed.
+                    chosen_row = max(best_qubits, key=lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1,0]]))
                     # Split the column into 1s and 0s in that row
                     cols1 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 1]
                     cols0 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 0]
@@ -466,7 +479,7 @@ class PhasePoly():
         last_parities = output_parities*current_parities.inverse()
         # Do steiner-gauss to calculate necessary CNOTs and add those to the circuit.
         cnots = CNOT_tracker(architecture.n_qubits)
-        gauss(mode, last_parities, architecture, y=cnots, **kwargs) # TODO - check if this works.
+        gauss(mode, last_parities, architecture, y=cnots, **kwargs) 
         for cnot in cnots.gates:
             circuit.add_gate(cnot)
         # Return the circuit
