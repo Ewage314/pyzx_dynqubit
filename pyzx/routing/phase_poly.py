@@ -30,12 +30,12 @@ from ..routing.architecture import create_architecture, FULLY_CONNNECTED
 
 TKET_STEINER_MODE = "tket-steiner"
         
-def route_phase_poly(circuit, architecture, mode, do_matroid=False, **kwargs):
+def route_phase_poly(circuit, architecture, mode, do_matroid=False, split_heuristic="count", root_heuristic="random", **kwargs):
     phase_poly = PhasePoly.fromCircuit(circuit)
     if do_matroid:
         new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
     else:
-        new_circuit = phase_poly.gray_synth(mode, architecture, **kwargs)[0]
+        new_circuit = phase_poly.gray_synth(mode, architecture, split_heuristic=split_heuristic, root_heuristic=root_heuristic, **kwargs)[0]
     return new_circuit
 
 def make_random_phase_poly(n_qubits, n_phase_layers, cnots_per_layer, return_circuit=False):
@@ -50,7 +50,68 @@ def make_random_phase_poly(n_qubits, n_phase_layers, cnots_per_layer, return_cir
     else:
         return PhasePoly.fromCircuit(c)
 
+
+def random_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs):
+    root = np.random.choice(qubits)
+    return list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
+
+def exhaustive_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs):
+    cnots = None
+    for root in qubits:        
+        # build a steiner tree
+        # Steiner extract with that qubit as root
+        possible_cnots = list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
+        if cnots is None or len(possible_cnots) < len(cnots):
+            cnots = possible_cnots
+    return cnots
+
+def arity_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs):
+    iterator = ((qubit, arity) for qubit,arity in architecture.arities if qubit in qubits)
+    q, a = next(iterator)
+    best_qubits = []
+    best_arity = a
+    while a == best_arity:
+        best_qubits.append(q)
+        q, a = next(iterator, (None, best_arity-1))
+    root = np.random.choice(best_qubits)
+    return list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
+
+def rec_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs):
+    root = phase_qubit
+    return list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
+
+
+def random_split_heuristic(architecture, matrix, cols_to_use, qubits, **kwargs):
+    return [np.random.choice(qubits)]
+
+def arity_split_heuristic(architecture, matrix, cols_to_use, qubits, **kwargs):
+    iterator = ((qubit, arity) for qubit,arity in architecture.arities if qubit in qubits)
+    q, a = next(iterator)
+    best_qubits = []
+    best_arity = a
+    while a == best_arity:
+        best_qubits.append(q)
+        q, a = next(iterator, (None, best_arity-1))
+    return best_qubits
+
+def count_split_heuristic(architecture, matrix, cols_to_use, qubits, **kwargs):
+    return qubits
+
+
 class PhasePoly():
+
+    root_heuristics = {
+        "random": random_root_heuristic,
+        "exhaustive": exhaustive_root_heuristic,
+        "arity": arity_root_heuristic,
+        "recursive": rec_root_heuristic
+    }
+
+    split_heuristics = {
+        "random": random_split_heuristic,
+        "arity": arity_split_heuristic,
+        "count": count_split_heuristic
+    }
 
     def __init__(self, zphase_dict, out_parities):
         self.zphases = zphase_dict
@@ -394,7 +455,7 @@ class PhasePoly():
         # Return the circuit
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
-    def rec_gray_synth(self, mode, architecture, **kwargs):
+    def rec_gray_synth(self, mode, architecture, root_heuristic="recursive", split_heuristic="count", zeroes_first=True, **kwargs):
         kwargs["full_reduce"] = True
         if architecture is None or GAUSS_MODE in mode:
             architecture = create_architecture(FULLY_CONNNECTED, n_qubits=len(self.out_par[0]))
@@ -420,18 +481,11 @@ class PhasePoly():
             if cols_to_use != []:   
                 # Find all qubits (rows) with only 1s on the allowed parities (cols_to_use) 
                 qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) == len(cols_to_use)]
-                if len(qubits) > 1:
+                if len(qubits) > 1 and phase_qubit is not None:
                     # Pick the column with the most 1s to extrac the steiner tree with
-                    column = max(cols_to_use, key=lambda c: sum([row[c] for row in matrix.data]))
-                    # Pick a qubit as root
-                    # TODO - something more efficient than exhaustive search
-                    cnots = None
-                    for root in qubits:        
-                        # build a steiner tree
-                        # Steiner extract with that qubit as root
-                        possible_cnots = list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
-                        if cnots is None or len(possible_cnots) < len(cnots):
-                            cnots = possible_cnots
+                    column = min(cols_to_use, key=lambda c: sum([row[c] for row in matrix.data]))
+                    # Pick a qubit as root using the given heuristic
+                    cnots = self.root_heuristics[root_heuristic](architecture, matrix, cols_to_use, qubits, column, phase_qubit)
                     # For each returned CNOT:
                     for target, control in cnots:
                         # Place the CNOT on the circuit
@@ -447,30 +501,26 @@ class PhasePoly():
                                 # Remove columns from the matrix if the corresponding parity was obtained
                                 cols_to_use.remove(col)    
                 # After placing the cnots do recursion
-                if len(cols_to_use) < 2:
-                    recurse(cols_to_use, qubits_to_use, phase_qubit)
-                else:
+                if len(cols_to_use) > 0:
                     # Choose a row to split on
-                    # Ignore rows that are currently all 0s or all 1s
-                    qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) not in [0, len(cols_to_use)]]
+                    if len(cols_to_use) == 1:
+                        qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) == 1]
+                    else:
+                        # Ignore rows that are currently all 0s or all 1s
+                        qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) not in [0, len(cols_to_use)]]
                     # Pick the one with the best connectivity everywhere
                     # TODO - add better heuristics and a method of switching
-                    iterator = ((qubit, arity) for qubit,arity in architecture.arities if qubit in qubits)
-                    q, a = next(iterator)
-                    best_qubits = []
-                    best_arity = a
-                    while a == best_arity:
-                        best_qubits.append(q)
-                        q, a = next(iterator, (None, best_arity-1))
+                    best_qubits = self.split_heuristics[split_heuristic](architecture, matrix, cols_to_use, qubits)
                     # Pick the qubit where the recursion split will be most skewed.
                     chosen_row = max(best_qubits, key=lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1,0]]))
                     # Split the column into 1s and 0s in that row
                     cols1 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 1]
                     cols0 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 0]
-                    # Recurse on the 1s
-                    recurse(cols1, qubits_to_use, phase_qubit)
-                    # Recurse on the 0s
-                    recurse(cols0, qubits_to_use, phase_qubit)
+                    rec_list = [(cols1, qubits_to_use, phase_qubit if phase_qubit is not None else chosen_row), (cols0, qubits_to_use, phase_qubit)]
+                    if zeroes_first:
+                        rec_list = reversed(rec_list)
+                    for args in rec_list:
+                        recurse(*args)
         # Put the base case into the python stack
         recurse([i for i in range(len(parities_to_reach))], [i for i in range(n_qubits)], None)
         # Calculate the final parity that needs to be added from the circuit and self.out_par
