@@ -35,7 +35,7 @@ def route_phase_poly(circuit, architecture, mode, do_matroid=False, split_heuris
     if do_matroid:
         new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
     else:
-        new_circuit = phase_poly.gray_synth(mode, architecture, split_heuristic=split_heuristic, root_heuristic=root_heuristic, **kwargs)[0]
+        new_circuit = phase_poly.rec_gray_synth(mode, architecture, split_heuristic=split_heuristic, root_heuristic=root_heuristic, **kwargs)[0]
     return new_circuit
 
 def make_random_phase_poly(n_qubits, n_phase_layers, cnots_per_layer, return_circuit=False):
@@ -455,7 +455,7 @@ class PhasePoly():
         # Return the circuit
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
-    def rec_gray_synth(self, mode, architecture, root_heuristic="recursive", split_heuristic="count", zeroes_first=True, **kwargs):
+    def rec_gray_synth(self, mode, architecture, root_heuristic="recursive", split_heuristic="count", **kwargs):
         kwargs["full_reduce"] = True
         if architecture is None or GAUSS_MODE in mode:
             architecture = create_architecture(FULLY_CONNNECTED, n_qubits=len(self.out_par[0]))

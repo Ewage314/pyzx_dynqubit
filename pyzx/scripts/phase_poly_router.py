@@ -40,6 +40,9 @@ parser.add_argument("--raw", default=False, type=bool, help="Whether the results
 parser.add_argument("--notes", default="", type=str, help="Extra notes that can be added to the csv")
 parser.add_argument("--placement", default=True, type=bool, help="Whether tket should optimize placement")
 parser.add_argument("--matroid", default=False, type=bool, help="Whether the algorithm should use matroid partitioning for synthesis, otherwise it uses gray synth.")
+parser.add_argument("--root_heuristic", nargs='+', default="recursive", choices=["recursive", "random", "exhaustive", "arity"], help="Which root heuristic should be used by gray synth")
+parser.add_argument("--split_heuristic", nargs='+', default="count", choices=["random", "count", "arity"], help="Which split heuristic should be used by gray synth")
+#parser.add_argument("--zeroes_first", nargs='+', default=True, type=bool, help="Whether the recursive gray synth should recurse on zeroes first or not.")
 #parser.add_argument("-n", "--n_circuits", nargs='+', dest="n", default=20, type=int, help="The number of circuits to generate.")
 #parser.add_argument("-p", "--n_phase_layers", nargs='+', dest="phase_layers", default=1, type=int, help="Number of layers with phases in the circuits to be generated.")
 #parser.add_argument("-c", "--cnots_between_layers", nargs='+', dest="cnots", default=5, type=int, help="Number of CNOT gates between each phase layer in the circuits to be generated.")
@@ -93,19 +96,31 @@ def main(args):
         else:
             archs = [create_architecture(a)]
         for architecture in archs:
-            results_df = map_phase_poly_circuits(sources, architecture, mode, do_matroid=args.matroid)
-            if not args.raw:
-                kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
-                results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 
-                                    results_df.median(**kwargs).add_suffix("_median"), 
-                                    results_df.min(**kwargs).add_suffix("_min"), 
-                                    results_df.max(**kwargs).add_suffix("_max")], axis=1)
-                #results_df["# phase layers"] = n_phase_layers
-                #results_df["# cnots per layer"] = n_cnots_per_layer
-                #results_df["architecture"] = architecture.name
-                #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
-            results_df["notes"] = args.notes 
-            all_results.append(results_df)
+            root_heurs = make_into_list(args.root_heuristic)
+            split_heurs = make_into_list(args.split_heuristic)
+            zeroes_first = make_into_list(args.zeroes_first)
+            if args.matroid:
+                root_heurs = root_heurs[:1]
+                split_heurs = split_heurs[:1]
+                zeroes_first = zeroes_first[:1]
+            for root_heuristic in root_heurs:
+                for split_heuristic in split_heurs:
+                        results_df = map_phase_poly_circuits(sources, architecture, mode, do_matroid=args.matroid, root_heuristic=root_heuristic, split_heuristic=split_heuristic)
+                        if not args.raw:
+                            kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
+                            results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 
+                                                results_df.median(**kwargs).add_suffix("_median"), 
+                                                results_df.min(**kwargs).add_suffix("_min"), 
+                                                results_df.max(**kwargs).add_suffix("_max")], axis=1)
+                            #results_df["# phase layers"] = n_phase_layers
+                            #results_df["# cnots per layer"] = n_cnots_per_layer
+                            #results_df["architecture"] = architecture.name
+                            #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
+                        results_df["notes"] = args.notes 
+                        results_df["matroid"] = args.matroid
+                        results_df["root_heuristic"] = root_heuristic
+                        results_df["split_heuristic"] = split_heuristic 
+                        all_results.append(results_df)
         if args.metrics_csv and all_results != []:
             final_df = concat(all_results)
             if os.path.exists(args.metrics_csv):
@@ -131,9 +146,9 @@ def map_phase_poly_circuits(sources, architecture, modes, placement=True, **kwar
                 a = architecture if mode == TKET_COMPILER else full_connected
                 c = route_tket(circuit.copy(), a, initial_mapping=tket_initial_mapping)
             elif mode == PHASEPOLY_TKET_MODE or mode == GAUSS_MODE:
-                c = route_phase_poly(circuit.copy(), architecture, GAUSS_MODE)
+                c = route_phase_poly(circuit.copy(), architecture, GAUSS_MODE, **kwargs)
             else:
-                c = route_phase_poly(circuit.copy(), architecture, mode, n_steps=5, population=5)
+                c = route_phase_poly(circuit.copy(), architecture, mode, n_steps=5, population=5, **kwargs)
             if mode == PHASEPOLY_TKET_MODE:
                 c = route_tket(c.copy(), architecture, initial_mapping=tket_initial_mapping)
             elif mode == TKET_THEN_STEINER_MODE:
