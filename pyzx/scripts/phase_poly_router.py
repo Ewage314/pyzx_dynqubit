@@ -98,11 +98,9 @@ def main(args):
         for architecture in archs:
             root_heurs = make_into_list(args.root_heuristic)
             split_heurs = make_into_list(args.split_heuristic)
-            zeroes_first = make_into_list(args.zeroes_first)
             if args.matroid:
                 root_heurs = root_heurs[:1]
                 split_heurs = split_heurs[:1]
-                zeroes_first = zeroes_first[:1]
             for root_heuristic in root_heurs:
                 for split_heuristic in split_heurs:
                         results_df = map_phase_poly_circuits(sources, architecture, mode, do_matroid=args.matroid, root_heuristic=root_heuristic, split_heuristic=split_heuristic)

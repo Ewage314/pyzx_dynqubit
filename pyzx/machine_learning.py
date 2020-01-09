@@ -316,7 +316,93 @@ class Particle():
         return new_particle
 
 
+class ProjectiveSimulation():
+
+    def __init__(self, inputs, outputs, gamma=10**-5, reflection=1, glow=1.):
+        self.inputs = inputs
+        self.outputs = outputs
+        self.gamma = gamma
+        self.reflection = reflection
+        self.glow = glow
+        self.h = np.ones((self.inputs, self.outputs))
+        self.g = np.zeros((self.inputs, self.outputs))
+        self.emotions = np.ones((self.outputs,))
+        self.prev_actions = []
+
+    def train(self, observations, reward, g=None, softmax=True): # you can use g for delayed rewards - code structure unfinished and untested.
+        # Update h values
+        if self.gamma != 0.:
+            # Damp the current h values
+            self.h = (1. - self.gamma) * self.h + self.gamma
+        if g is None:
+            # Reward the used edges
+            self.update_reward(reward)
+        if reward > 0: # TODO fix how emotions are handles - currently wrong.
+            self.emotions = np.zeros((self.outputs,))
+            self.emotions[self.prev_actions] = 1.
+
+        # Damp the glow of the edges:
+        self.g = (1. - self.glow) * self.g
+        action = self.step(observations, softmax=softmax)
+        return action, self.g
+
+    def update_reward(self, reward, g=None):
+        if g is None:
+            # Reward the used edges
+            self.h += self.g * reward
+        else:
+            self.h += g * reward
+
+
+    def step(self, observations, softmax=True):
+        # Pick action:
+        probs = [np.sum(self.h[observation], axis=0) for observation in observations] 
+        if softmax:
+            probs = [np.exp(prob) for prob in probs]
+        probs = np.sum(probs, axis=0)
+        probs = probs/probs.sum()
+        for _ in range(self.reflection):
+            action = np.random.choice(self.outputs, p=probs)
+            if self.emotions[action] == 1:
+                return action
+        self.prev_actions = [action]
+        self.g[observations, action] = np.ones((len(observations),))
+        return action
+
+
+
 if __name__ == '__main__':
+    print("Testing projective simulation")
+    def running_mean(x, N):
+        cumsum = np.cumsum(np.insert(x, 0, 0)) 
+        return (cumsum[N:] - cumsum[:-N]) / float(N)
+
+    n = 100
+    iterations = 20000
+
+    ps = ProjectiveSimulation(n*2, n+1, gamma=10**-4)
+
+    reward = 0
+    errors = []
+    count = 0
+    for i in range(iterations):
+        data = np.random.choice(2, n)
+        #print(data)
+        observations = [i for i in range(n) if data[i]==0] + [i+n for i in range(n) if data[i]==1]
+        #print(observations)
+        action = ps.train(observations, reward)
+        error = np.abs(sum(data) - action)
+        if error == 0 and i > iterations - 1000:
+            count += 1
+        reward = 0 if error > 2 else 1#max(0, n-error-90)
+        errors.append(error)
+    rm = running_mean(errors, 10)
+    print(rm[:100])
+    print(count)
+    print(rm[-100:])
+
+
+    """
     def fitness_func(chromosome):
         t1 = 1
         t2 = 1
@@ -330,8 +416,9 @@ if __name__ == '__main__':
             t2 += int(f2[i] == f2[i-1])
         return t1 + t2
 
-
+    print("Start optimizer...")
     optimizer = GeneticAlgorithm(1000, 0.8, 0.2, fitness_func)
     optimizer.find_optimimum(8, 300)
     print(optimizer.population)
-
+    """
+    pass

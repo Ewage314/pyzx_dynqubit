@@ -39,6 +39,7 @@ if __name__ == '__main__':
         from .scripts import cnot_generator
         from .scripts import phase_poly_generator
         from .scripts import phase_poly_router
+        from .scripts import phase_poly_trainer
     except SystemError:
         print("Please run as a module by using 'python -m pyzx'")
         exit(1)
@@ -50,7 +51,7 @@ if __name__ == '__main__':
         parser.print_help()
         exit(1)
     args = parser.parse_args(sys.argv[1:2])
-    if args.command not in ('opt', 'tikz', 'mapper', 'router', 'cnots', 'phasepoly'):
+    if args.command not in ('opt', 'tikz', 'mapper', 'router', 'cnots', 'phasepoly', 'train'):
         print("Unrecognized command '{}'".format(args.command))
         parser.print_help()
         exit(1)
@@ -67,4 +68,7 @@ if __name__ == '__main__':
         cnot_generator.main(sys.argv[2:])
     if args.command == 'phasepoly':
         phase_poly_generator.main(sys.argv[2:])
+    if args.command == "train":
+        phase_poly_trainer.main(sys.argv[2:])
+
 

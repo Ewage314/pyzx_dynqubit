@@ -30,8 +30,8 @@ from ..routing.architecture import create_architecture, FULLY_CONNNECTED
 
 TKET_STEINER_MODE = "tket-steiner"
         
-def route_phase_poly(circuit, architecture, mode, do_matroid=False, split_heuristic="count", root_heuristic="random", **kwargs):
-    phase_poly = PhasePoly.fromCircuit(circuit)
+def route_phase_poly(circuit, architecture, mode, do_matroid=False, split_heuristic="count", root_heuristic="random", ps=None, **kwargs):
+    phase_poly = PhasePoly.fromCircuit(circuit, ps=ps)
     if do_matroid:
         new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
     else:
@@ -80,6 +80,31 @@ def rec_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_
     root = phase_qubit
     return list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
 
+def ml_root_heuristic(ps, architecture, matrix, cols_to_use, qubits, column, phase_qubit, train=False, **kwargs):
+    n_qubits = architecture.n_qubits
+    observations = []
+    for col in cols_to_use:
+        observations.append([i for i in range(n_qubits) if matrix.data[i][col] == 0] + [i+n_qubits for i in range(n_qubits) if matrix.data[i][col] == 1])
+    observations.append(2*n_qubits+phase_qubit)
+    if train:
+        action, g = ps.train(observations, 0, g=[])
+        cnots = list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], action, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
+        reward = calculate_reward(architecture, matrix, [col for col in cols_to_use if col != column], action) - len(cnots)/len(cols_to_use)
+        ps.update_reward(reward, g=g)
+        return cnots
+    else:
+        action = ps.step(observations)
+        root = action
+        return list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
+
+def calculate_reward(architecture, matrix, cols_to_use, root):
+    n_qubits = architecture.n_qubits
+    all_cnots = 0
+    for column in cols_to_use:
+        qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) == len(cols_to_use)]
+        cnots = list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(n_qubits)], [], upper=True))
+        all_cnots += len(cnots)
+    return 2*n_qubits -  all_cnots/(len(cols_to_use) + 1)
 
 def random_split_heuristic(architecture, matrix, cols_to_use, qubits, **kwargs):
     return [np.random.choice(qubits)]
@@ -113,14 +138,16 @@ class PhasePoly():
         "count": count_split_heuristic
     }
 
-    def __init__(self, zphase_dict, out_parities):
+    def __init__(self, zphase_dict, out_parities, ps=None, train=False):
         self.zphases = zphase_dict
         self.out_par = out_parities
         self.n_qubits = len(out_parities[0])
         self.all_parities = list(zphase_dict.keys())
+        if ps is not None:
+            self.root_heuristics["ml"] = lambda *args, **kwargs: ml_root_heuristic(ps, *args, train=train, **kwargs)
 
     @staticmethod
-    def fromCircuit(circuit, initial_qubit_placement=None, final_qubit_placement=None):
+    def fromCircuit(circuit, initial_qubit_placement=None, final_qubit_placement=None, ps=None):
         zphases = {}
         current_parities = mat22partition(Mat2.id(circuit.qubits))
         if initial_qubit_placement is not None:
@@ -149,7 +176,7 @@ class PhasePoly():
         zphases = {par:clamp(r) for par, r in zphases.items() if clamp(r) != 0}
         if final_qubit_placement is not None:
             current_parities = [ current_parities[i] for i in final_qubit_placement]
-        return PhasePoly(zphases, current_parities)
+        return PhasePoly(zphases, current_parities, ps=ps)
 
     def partition(self, skip_output_parities=True, optimize_parity_order=False):
         # Matroid partitioning based on wikipedia: https://en.wikipedia.org/wiki/Matroid_partitioning
@@ -517,8 +544,6 @@ class PhasePoly():
                     cols1 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 1]
                     cols0 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 0]
                     rec_list = [(cols1, qubits_to_use, phase_qubit if phase_qubit is not None else chosen_row), (cols0, qubits_to_use, phase_qubit)]
-                    if zeroes_first:
-                        rec_list = reversed(rec_list)
                     for args in rec_list:
                         recurse(*args)
         # Put the base case into the python stack
