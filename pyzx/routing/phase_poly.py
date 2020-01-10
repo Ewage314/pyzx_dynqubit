@@ -80,6 +80,10 @@ def rec_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_
     root = phase_qubit
     return list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
 
+def fixed_root_heuristic(root_order, architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs):
+    phase_qubit = root_order[column]
+    return rec_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs)
+
 def ml_root_heuristic(ps, architecture, matrix, cols_to_use, qubits, column, phase_qubit, train=False, **kwargs):
     n_qubits = architecture.n_qubits
     observations = []
@@ -138,13 +142,15 @@ class PhasePoly():
         "count": count_split_heuristic
     }
 
-    def __init__(self, zphase_dict, out_parities, ps=None, train=False):
+    def __init__(self, zphase_dict, out_parities, ps=None, train=False, root_order=None):
         self.zphases = zphase_dict
         self.out_par = out_parities
         self.n_qubits = len(out_parities[0])
         self.all_parities = list(zphase_dict.keys())
         if ps is not None:
             self.root_heuristics["ml"] = lambda *args, **kwargs: ml_root_heuristic(ps, *args, train=train, **kwargs)
+        if root_order is not None:
+            self.root_heuristics["fixed"] = lambda *args, **kwargs: fixed_root_heuristic(root_order, *args, **kwargs)
 
     @staticmethod
     def fromCircuit(circuit, initial_qubit_placement=None, final_qubit_placement=None, ps=None):
@@ -510,7 +516,7 @@ class PhasePoly():
                 qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) == len(cols_to_use)]
                 if len(qubits) > 1 and phase_qubit is not None:
                     # Pick the column with the most 1s to extrac the steiner tree with
-                    column = min(cols_to_use, key=lambda c: sum([row[c] for row in matrix.data]))
+                    column = max(cols_to_use, key=lambda c: sum([row[c] for row in matrix.data]))
                     # Pick a qubit as root using the given heuristic
                     cnots = self.root_heuristics[root_heuristic](architecture, matrix, cols_to_use, qubits, column, phase_qubit)
                     # For each returned CNOT:
