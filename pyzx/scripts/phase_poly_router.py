@@ -1,4 +1,4 @@
-import sys, os, re
+import sys, os, re, glob, pickle
 import datetime
 import numpy as np
 from pandas import DataFrame, concat
@@ -40,7 +40,7 @@ parser.add_argument("--raw", default=False, type=bool, help="Whether the results
 parser.add_argument("--notes", default="", type=str, help="Extra notes that can be added to the csv")
 parser.add_argument("--placement", default=True, type=bool, help="Whether tket should optimize placement")
 parser.add_argument("--matroid", default=False, type=bool, help="Whether the algorithm should use matroid partitioning for synthesis, otherwise it uses gray synth.")
-parser.add_argument("--root_heuristic", nargs='+', default="recursive", choices=["recursive", "random", "exhaustive", "arity"], help="Which root heuristic should be used by gray synth")
+parser.add_argument("--root_heuristic", nargs='+', default="recursive", choices=["recursive", "random", "exhaustive", "arity", "model"], help="Which root heuristic should be used by gray synth")
 parser.add_argument("--split_heuristic", nargs='+', default="count", choices=["random", "count", "arity"], help="Which split heuristic should be used by gray synth")
 #parser.add_argument("--zeroes_first", nargs='+', default=True, type=bool, help="Whether the recursive gray synth should recurse on zeroes first or not.")
 #parser.add_argument("-n", "--n_circuits", nargs='+', dest="n", default=20, type=int, help="The number of circuits to generate.")
@@ -102,8 +102,11 @@ def main(args):
                 root_heurs = root_heurs[:1]
                 split_heurs = split_heurs[:1]
             for root_heuristic in root_heurs:
+                models = None
+                if root_heuristic == "model":
+                    models = [pickle.load(open(filename, "rb")) for filename in glob.glob(architecture.name +"_model_"+"*.pickle")]
                 for split_heuristic in split_heurs:
-                        results_df = map_phase_poly_circuits(sources, architecture, mode, do_matroid=args.matroid, root_heuristic=root_heuristic, split_heuristic=split_heuristic)
+                        results_df = map_phase_poly_circuits(sources, architecture, mode, do_matroid=args.matroid, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
                         if not args.raw:
                             kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
                             results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 

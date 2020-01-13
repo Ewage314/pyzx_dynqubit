@@ -27,11 +27,12 @@ from ..routing.cnot_mapper import sequential_gauss, GAUSS_MODE, STEINER_MODE, TK
 from ..routing.tket_router import get_tk_architecture, pyzx_to_tk, graph_placement
 from ..routing.steiner import steiner_reduce_column
 from ..routing.architecture import create_architecture, FULLY_CONNNECTED
+from ..utils import make_into_list
 
 TKET_STEINER_MODE = "tket-steiner"
         
-def route_phase_poly(circuit, architecture, mode, do_matroid=False, split_heuristic="count", root_heuristic="random", ps=None, **kwargs):
-    phase_poly = PhasePoly.fromCircuit(circuit, ps=ps)
+def route_phase_poly(circuit, architecture, mode, do_matroid=False, split_heuristic="count", root_heuristic="recursive", ps=None, models=None, **kwargs):
+    phase_poly = PhasePoly.fromCircuit(circuit, ps=ps, models=models)
     if do_matroid:
         new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
     else:
@@ -83,6 +84,33 @@ def rec_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_
 def fixed_root_heuristic(root_order, architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs):
     phase_qubit = root_order[column]
     return rec_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs)
+
+def model_root_heuristic(models, architecture, matrix, cols_to_use, qubits, column, phase_qubit, try_default=True, mode="steiner", split_heuristic="count", **kwargs):
+    model = None
+    # Pick the right model
+    for m in models:
+        if len(cols_to_use) == m.n_outputs_:
+            model = m
+    if model is None:
+        # If no suitable model is found, return the normal recursion with recursive
+        return rec_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs)
+    # Build a phase polynomial from the remaining columns 
+    zphase_dict = {"".join([str(int(row[col])) for row in matrix.data]):Fraction(1,4) for col in cols_to_use}
+    out_parities = mat22partition(Mat2.id(architecture.n_qubits))
+    # Pick the best phase locations
+    root_order = model.predict(np.asarray([[row[col] for col in cols_to_use] for row in matrix.data]).reshape((1, -1)))[0]
+    # Synthesize the phase polynomial given these locations
+    phase_poly = PhasePoly(zphase_dict, out_parities, root_order=root_order)
+    circuit = phase_poly.rec_gray_synth(mode, architecture, root_heuristic="fixed", split_heuristic=split_heuristic, full=False)[0]
+    if try_default:
+        # See if the recursive heuristic is better
+        other_circuit = phase_poly.rec_gray_synth(mode, architecture, root_heuristic="recursive", split_heuristic=split_heuristic, full=False, phase_qubit=phase_qubit)[0]
+        if other_circuit.count_cnots() < circuit.count_cnots():
+            # If so, use that
+            circuit = other_circuit
+    # Turn the synthesized circuit back into a list of reversed CNOTs
+    cnots = [(gate.target, gate.control) for gate in circuit.gates if gate.name in ["CNOT", "CX"]]
+    return cnots
 
 def ml_root_heuristic(ps, architecture, matrix, cols_to_use, qubits, column, phase_qubit, train=False, **kwargs):
     n_qubits = architecture.n_qubits
@@ -142,7 +170,7 @@ class PhasePoly():
         "count": count_split_heuristic
     }
 
-    def __init__(self, zphase_dict, out_parities, ps=None, train=False, root_order=None):
+    def __init__(self, zphase_dict, out_parities, ps=None, train=False, root_order=None, models=None):
         self.zphases = zphase_dict
         self.out_par = out_parities
         self.n_qubits = len(out_parities[0])
@@ -151,9 +179,12 @@ class PhasePoly():
             self.root_heuristics["ml"] = lambda *args, **kwargs: ml_root_heuristic(ps, *args, train=train, **kwargs)
         if root_order is not None:
             self.root_heuristics["fixed"] = lambda *args, **kwargs: fixed_root_heuristic(root_order, *args, **kwargs)
+        if models is not None:
+            models = make_into_list(models)
+            self.root_heuristics["model"] = lambda *args, **kwargs: model_root_heuristic(models, *args, **kwargs)
 
     @staticmethod
-    def fromCircuit(circuit, initial_qubit_placement=None, final_qubit_placement=None, ps=None):
+    def fromCircuit(circuit, initial_qubit_placement=None, final_qubit_placement=None, ps=None, models=None):
         zphases = {}
         current_parities = mat22partition(Mat2.id(circuit.qubits))
         if initial_qubit_placement is not None:
@@ -182,7 +213,7 @@ class PhasePoly():
         zphases = {par:clamp(r) for par, r in zphases.items() if clamp(r) != 0}
         if final_qubit_placement is not None:
             current_parities = [ current_parities[i] for i in final_qubit_placement]
-        return PhasePoly(zphases, current_parities, ps=ps)
+        return PhasePoly(zphases, current_parities, ps=ps, models=models)
 
     def partition(self, skip_output_parities=True, optimize_parity_order=False):
         # Matroid partitioning based on wikipedia: https://en.wikipedia.org/wiki/Matroid_partitioning
@@ -488,7 +519,7 @@ class PhasePoly():
         # Return the circuit
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
-    def rec_gray_synth(self, mode, architecture, root_heuristic="recursive", split_heuristic="count", **kwargs):
+    def rec_gray_synth(self, mode, architecture, root_heuristic="recursive", split_heuristic="count", full=True, phase_qubit=None, **kwargs):
         kwargs["full_reduce"] = True
         if architecture is None or GAUSS_MODE in mode:
             architecture = create_architecture(FULLY_CONNNECTED, n_qubits=len(self.out_par[0]))
@@ -518,7 +549,7 @@ class PhasePoly():
                     # Pick the column with the most 1s to extrac the steiner tree with
                     column = max(cols_to_use, key=lambda c: sum([row[c] for row in matrix.data]))
                     # Pick a qubit as root using the given heuristic
-                    cnots = self.root_heuristics[root_heuristic](architecture, matrix, cols_to_use, qubits, column, phase_qubit)
+                    cnots = self.root_heuristics[root_heuristic](architecture, matrix, cols_to_use, qubits, column, phase_qubit, mode=mode, root_heuristic="recursive", split_heuristic="count")
                     # For each returned CNOT:
                     for target, control in cnots:
                         # Place the CNOT on the circuit
@@ -542,10 +573,9 @@ class PhasePoly():
                         # Ignore rows that are currently all 0s or all 1s
                         qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) not in [0, len(cols_to_use)]]
                     # Pick the one with the best connectivity everywhere
-                    # TODO - add better heuristics and a method of switching
                     best_qubits = self.split_heuristics[split_heuristic](architecture, matrix, cols_to_use, qubits)
                     # Pick the qubit where the recursion split will be most skewed.
-                    chosen_row = max(best_qubits, key=lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1,0]]))
+                    chosen_row = max(best_qubits, key=lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1,0]], default=-1))
                     # Split the column into 1s and 0s in that row
                     cols1 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 1]
                     cols0 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 0]
@@ -553,16 +583,17 @@ class PhasePoly():
                     for args in rec_list:
                         recurse(*args)
         # Put the base case into the python stack
-        recurse([i for i in range(len(parities_to_reach))], [i for i in range(n_qubits)], None)
-        # Calculate the final parity that needs to be added from the circuit and self.out_par
-        current_parities = circuit.matrix
-        output_parities = Mat2([[int(v) for v in row] for row in self.out_par])
-        last_parities = output_parities*current_parities.inverse()
-        # Do steiner-gauss to calculate necessary CNOTs and add those to the circuit.
-        cnots = CNOT_tracker(architecture.n_qubits)
-        gauss(mode, last_parities, architecture, y=cnots, **kwargs) 
-        for cnot in cnots.gates:
-            circuit.add_gate(cnot)
+        recurse([i for i in range(len(parities_to_reach))], [i for i in range(n_qubits)], phase_qubit)
+        if full:
+            # Calculate the final parity that needs to be added from the circuit and self.out_par
+            current_parities = circuit.matrix
+            output_parities = Mat2([[int(v) for v in row] for row in self.out_par])
+            last_parities = output_parities*current_parities.inverse()
+            # Do steiner-gauss to calculate necessary CNOTs and add those to the circuit.
+            cnots = CNOT_tracker(architecture.n_qubits)
+            gauss(mode, last_parities, architecture, y=cnots, **kwargs) 
+            for cnot in cnots.gates:
+                circuit.add_gate(cnot)
         # Return the circuit
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 

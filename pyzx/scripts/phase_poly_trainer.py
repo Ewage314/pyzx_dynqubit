@@ -11,13 +11,15 @@ from ..linalg import Mat2
 from ..circuit import Fraction
 
 def main(*args):
-    architecture = create_architecture("fully_connected", n_qubits=5)
-    n_columns = 2
-    features_file = architecture.name + "_features_" + str(n_columns)+".npy"
-    label_file = architecture.name + "_labels_" + str(n_columns)+".npy"
-    if not os.path.exists(features_file) or not os.path.exists(label_file):
-        create_dataset(architecture, n_columns)
-    train(architecture, n_columns)
+    architecture = create_architecture("ibm_qx2")
+    n_columns_list = [4]
+    for n_columns in n_columns_list:
+        print("Phase polynomials with", n_columns, "phase gadgets:")
+        features_file = architecture.name + "_features_" + str(n_columns)+".npy"
+        label_file = architecture.name + "_labels_" + str(n_columns)+".npy"
+        if not os.path.exists(features_file) or not os.path.exists(label_file):
+            create_dataset(architecture, n_columns)
+        train(architecture, n_columns)
 
 def train(architecture, n_columns):
     n_qubits = architecture.n_qubits
@@ -29,11 +31,13 @@ def train(architecture, n_columns):
     print("Data samples, polynomial size", y.shape)
     # Train model
     print("Training model")
-    model = ExtraTreesClassifier(n_estimators=100, max_depth=None, n_jobs=-1)
-    #model = tree.DecisionTreeClassifier()
+    #model = RandomForestClassifier(n_estimators=100, max_depth=None, n_jobs=-1)
+    #model = ExtraTreesClassifier(n_estimators=100, max_depth=None, n_jobs=-1)
+    model = tree.DecisionTreeClassifier()
     model = model.fit(data, y)
     with open(architecture.name + "_model_" + str(n_columns)+".pickle", "wb") as f:
         pickle.dump(model, f)
+        pass
     # Test model
     print("Testing model on train data")
     # TODO generate new data for generalisation testing
@@ -47,7 +51,6 @@ def train(architecture, n_columns):
         out_parities = mat22partition(Mat2.id(n_qubits))
         # Generate all possible orders
         options = [root_order, model.predict([features])[0], None]
-        print(options[1])
         counts = []
         for i, root_order in enumerate(options):
             phase_poly = PhasePoly(zphase_dict, out_parities, root_order=root_order)
@@ -101,7 +104,7 @@ def create_dataset(architecture, n_columns):
     parities = list(itertools.product(*temp))
     perm = np.random.permutation(parities) # Drop the full zero parity
     data = []
-    for _ in range(100):
+    for _ in range(10):
         qubits = np.random.choice(n_qubits, 2, replace=False)
         indices = [j for j in range(n_qubits) if j not in qubits]
         for i in range(0, len(perm)-n_columns, n_columns):
@@ -111,13 +114,14 @@ def create_dataset(architecture, n_columns):
     data = np.asarray(data)
     print("Generated phase polynomials of shape:", data.shape)
     y = []
+    X = []
     for parities in data:
         # Find the best root order for each phase polynomial by exhaustive search
         zphase_dict = {"".join([str(int(i)) for i in p]):Fraction(1,4) for p in parities}
         out_parities = mat22partition(Mat2.id(n_qubits))
         # Generate all possible orders
         options = list(itertools.product(*([list(range(n_qubits))]*n_columns)))
-        best_order = None
+        best_order = []
         best_count = None
         for root_order in options:
             phase_poly = PhasePoly(zphase_dict, out_parities, root_order=root_order)
@@ -125,11 +129,14 @@ def create_dataset(architecture, n_columns):
             count = circuit.count_cnots()
             if best_count is None or best_count > count:
                 best_count = count
-                best_order = root_order
+                best_order = [root_order]
+            elif best_count == count:
+                best_order.append(root_order)
         # Store the best order
-        y.append(best_order)
+        y += best_order
+        X += [parities]*len(best_order)
     # Reshape the data to 2D
-    data = np.reshape(data, (len(y), n_columns*n_qubits))
+    data = np.reshape(X, (-1, n_columns*n_qubits))
     # Store the phase polynomial with their best extraction order.
     np.save(architecture.name+"_features_"+str(n_columns), data)
     np.save(architecture.name + "_labels_"+str(n_columns), y)
