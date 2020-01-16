@@ -534,14 +534,7 @@ class PhasePoly():
                             # Remove columns from the matrix if the corresponding parity was obtained
                             cols_to_skip.append(col)    
         # Calculate the final parity that needs to be added from the circuit and self.out_par
-        current_parities = circuit.matrix
-        output_parities = Mat2([[int(v) for v in row] for row in self.out_par])
-        last_parities = output_parities*current_parities.inverse()
-        # Do steiner-gauss to calculate necessary CNOTs and add those to the circuit.
-        cnots = CNOT_tracker(architecture.n_qubits)
-        gauss(mode, last_parities, architecture, y=cnots, **kwargs) # TODO - check if this works.
-        for cnot in cnots.gates:
-            circuit.add_gate(cnot)
+        self._obtain_final_parities(circuit, architecture, mode, **kwargs)
         # Return the circuit
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
@@ -561,13 +554,7 @@ class PhasePoly():
         # Make a stack - aka use the python stack >^.^<
         def recurse(cols_to_use, qubits_to_use, phase_qubit): # Arguments from the original paper, steiner version might only use the first
             # Check for finished columns
-            for col in [c for c in range(matrix.cols()) if c in cols_to_use]:
-                if sum([row[col] for row in matrix.data]) == 1:
-                    # Add phase gates where needed
-                    qubit = [row[col] for row in matrix.data].index(1)
-                    circuit.add_gate(ZPhase(qubit, self.zphases[parities_to_reach[col]]))
-                    # Remove columns from the matrix if the corresponding parity was obtained
-                    cols_to_use.remove(col) 
+            cols_to_use = self._check_columns(matrix, circuit, cols_to_use, parities_to_reach)
             if cols_to_use != []:   
                 # Find all qubits (rows) with only 1s on the allowed parities (cols_to_use) 
                 qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) == len(cols_to_use)]
@@ -583,13 +570,7 @@ class PhasePoly():
                         # Adjust the matrix accordingly - reversed elementary row operations
                         matrix.row_add(target, control)
                         # Keep track of the parities in the circuit - normal elementary row operations
-                        for col in [c for c in range(matrix.cols()) if c in cols_to_use]:
-                            if sum([row[col] for row in matrix.data]) == 1:
-                                # Add phase gates where needed
-                                qubit = [row[col] for row in matrix.data].index(1)
-                                circuit.add_gate(ZPhase(qubit, self.zphases[parities_to_reach[col]]))
-                                # Remove columns from the matrix if the corresponding parity was obtained
-                                cols_to_use.remove(col)    
+                        cols_to_use = self._check_columns(matrix, circuit, cols_to_use, parities_to_reach)   
                 # After placing the cnots do recursion
                 if len(cols_to_use) > 0:
                     # Choose a row to split on
@@ -612,18 +593,58 @@ class PhasePoly():
         recurse([i for i in range(len(parities_to_reach))], [i for i in range(n_qubits)], phase_qubit)
         if full:
             # Calculate the final parity that needs to be added from the circuit and self.out_par
-            current_parities = circuit.matrix
-            output_parities = Mat2([[int(v) for v in row] for row in self.out_par])
-            last_parities = output_parities*current_parities.inverse()
-            # Do steiner-gauss to calculate necessary CNOTs and add those to the circuit.
-            cnots = CNOT_tracker(architecture.n_qubits)
-            gauss(mode, last_parities, architecture, y=cnots, **kwargs) 
-            for cnot in cnots.gates:
-                circuit.add_gate(cnot)
+           self._obtain_final_parities(circuit, architecture, mode, **kwargs)
         # Return the circuit
         circuit.n_gadgets = len(self.zphases.keys())
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
+    def Ariannes_synth(self, mode, architecture, full=True, **kwargs):
+        raise NotImplementedError("Ariannes syntesis method is not implemented yet.")
+        kwargs["full_reduce"] = True
+        if architecture is None or GAUSS_MODE in mode:
+            architecture = create_architecture(FULLY_CONNNECTED, n_qubits=len(self.out_par[0]))
+            mode = GAUSS_MODE
+        else:
+            mode = GAUSS_MODE if GAUSS_MODE in mode else STEINER_MODE
+        n_qubits = architecture.n_qubits
+        # Obtain the parities
+        parities_to_reach = self.all_parities
+        # Make a matrix from the parities
+        matrix = Mat2([[int(parity[i]) for parity in parities_to_reach] for i in range(architecture.n_qubits)] )
+        circuit = CNOT_tracker(architecture.n_qubits)
+        cols_to_reach = self._check_columns(matrix, circuit, [i for i in range(len(parities_to_reach))], parities_to_reach)
+        # TODO add algorithm.
+        def recurse(cols_to_use, qubits_to_use):
+            pass
+        recurse(cols_to_reach, [i for i in range(n_qubits)])
+        if full:
+            # Calculate the final parity that needs to be added from the circuit and self.out_par
+           self._obtain_final_parities(circuit, architecture, mode, **kwargs)
+        # Return the circuit
+        circuit.n_gadgets = len(self.zphases.keys())
+        return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
+
+    def _check_columns(self, matrix, circuit, columns, parities_to_reach):
+        # Check for finished columns
+        for col in [c for c in columns]:
+            if sum([row[col] for row in matrix.data]) == 1:
+                # Add phase gates where needed
+                qubit = [row[col] for row in matrix.data].index(1)
+                circuit.add_gate(ZPhase(qubit, self.zphases[parities_to_reach[col]]))
+                # Remove columns from the matrix if the corresponding parity was obtained
+                columns.remove(col)
+        return columns 
+
+    def _obtain_final_parities(self, circuit, architecture, mode, **kwargs):
+        # Calculate the final parity that needs to be added from the circuit and self.out_par
+        current_parities = circuit.matrix
+        output_parities = Mat2([[int(v) for v in row] for row in self.out_par])
+        last_parities = output_parities*current_parities.inverse()
+        # Do steiner-gauss to calculate necessary CNOTs and add those to the circuit.
+        cnots = CNOT_tracker(architecture.n_qubits)
+        gauss(mode, last_parities, architecture, y=cnots, **kwargs) 
+        for cnot in cnots.gates:
+            circuit.add_gate(cnot)
             
 
 
