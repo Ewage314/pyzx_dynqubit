@@ -39,7 +39,7 @@ parser.add_argument("--subfolder", default=None, type=str, nargs="+", help="Poss
 parser.add_argument("--raw", default=False, type=bool, help="Whether the results should be raw or aggregated with mean/median/min/max")
 parser.add_argument("--notes", default="", type=str, help="Extra notes that can be added to the csv")
 parser.add_argument("--placement", default=True, type=bool, help="Whether tket should optimize placement")
-parser.add_argument("--matroid", default=False, type=bool, help="Whether the algorithm should use matroid partitioning for synthesis, otherwise it uses gray synth.")
+parser.add_argument("--matroid", default=False, choices=[True, False, "arianne", "both"], help="Whether the algorithm should use matroid partitioning for synthesis, otherwise it uses gray synth.")
 parser.add_argument("--root_heuristic", nargs='+', default="recursive", choices=["recursive", "random", "exhaustive", "arity", "model"], help="Which root heuristic should be used by gray synth")
 parser.add_argument("--split_heuristic", nargs='+', default="count", choices=["random", "count", "arity", "count->arity"], help="Which split heuristic should be used by gray synth")
 #parser.add_argument("--zeroes_first", nargs='+', default=True, type=bool, help="Whether the recursive gray synth should recurse on zeroes first or not.")

@@ -72,6 +72,7 @@ class Architecture():
         else:
             self.qubit_map = [i for i, v in enumerate(self.vertices)]
         self.n_qubits = len(self.vertices)
+        self.pre_calc_non_cutting_vertices()
         self.reduce_order = reduce_order if reduce_order is not None else [i-1 for i in range(self.n_qubits, 0,-1)]
         self.arities = [(i, len([edge for edge in self.graph.edges() if edge[0] == v])) for i,v in enumerate(self.vertices)]
         self.arities.sort(key=lambda p: p[1], reverse=True)
@@ -79,6 +80,79 @@ class Architecture():
     def pre_calc_distances(self):
         self.distances = {"upper": [self.floyd_warshall(until, upper=True) for until, v in enumerate(self.vertices)],
                           "full": [self.floyd_warshall(until, upper=False) for until, v in enumerate(self.vertices)]}
+
+    def pre_calc_non_cutting_vertices(self):
+        # TODO implement this and uncomment line in constructor.
+        #raise NotImplementedError("pre calculation non cutting vertices")
+        qubits = [i for i in range(self.n_qubits)]
+        def collect_non_cutting(qubits):
+            if qubits == []:
+                return []
+            vertices = [self.vertices[q] for q in qubits]
+            is_cutting = self._is_cutting(vertices)
+            non_cutting = [q for i,q  in enumerate(qubits) if not is_cutting[i] ]
+            all_non_cutting = [(qubits, non_cutting)]
+            for qubit in non_cutting:
+                subgraph = [q for q in qubits if q != qubit]
+                all_non_cutting += collect_non_cutting(subgraph)
+            return all_non_cutting
+        self._non_cutting_vertices = collect_non_cutting(qubits)
+    
+    def non_cutting_vertices(self, subgraph):
+        # Find the precalculated non-cutting vertices for this subgraph
+        if subgraph == []:
+            return []
+        subgraphs, non_cutting = zip(*self._non_cutting_vertices)
+        index = subgraphs.index(subgraph)
+        return non_cutting[index]
+
+
+    def _is_cutting(self, qubits=None):
+        # algortihm from https://courses.cs.washington.edu/courses/cse421/04su/slides/artic.pdf and https://www.geeksforgeeks.org/articulation-points-or-cut-vertices-in-a-graph/ 
+        # Code written myself.
+        if qubits is None:
+            qubits = self.vertices
+        n_qubits = len(qubits)
+        discovery_times = [-1]*n_qubits
+        lows = [None]*n_qubits
+        index_lookup = {self.vertices[v]:i for i, v in enumerate(qubits)}
+        self.dfs_counter = 0
+        edges = [e for e in self.graph.edges() if e[0] in qubits and e[1] in qubits]
+        cutting = [False] * n_qubits
+        parent = [-1] * n_qubits
+        def dfs(vertex,):
+            v = index_lookup[vertex]
+            self.dfs_counter += 1
+            discovery_times[v] = self.dfs_counter
+            lows[v] = discovery_times[v]
+            children = 0
+            for edge in [e for e in edges if e[0] == vertex]:
+                vertex2 = edge[1]
+                v2 = index_lookup[vertex2]
+                if discovery_times[v2] == -1: # Not visited yet
+                    parent[v2] = v
+                    children += 1
+                    dfs(vertex2)
+                    lows[v] = min(lows[v], lows[v2])
+                    if parent[v] == -1 and children > 1:
+                        cutting[v] = True
+                    if parent[v] != -1 and lows[v2] >= discovery_times[v]:
+                        cutting[v] = True
+                elif v2 != parent[v]:
+                    lows[v] = min(lows[v], discovery_times[v2])
+        for vertex in qubits:
+            v = index_lookup[vertex]
+            if discovery_times[v] == -1:
+                dfs(vertex)
+        del self.dfs_counter
+        return cutting
+                    
+
+
+
+    def get_neighboring_qubits(self, qubit):
+        neighboring_qubits = set([edge[1] for edge in self.graph.edges() if edge[0] == self.vertices[qubit] ] + [edge[0] for edge in self.graph.edges() if edge[1] == self.vertices[qubit]])
+        return [self.vertices.index(q) for q in neighboring_qubits]
 
     def to_quil_device(self):
         # Only required here
