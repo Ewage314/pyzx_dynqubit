@@ -41,7 +41,7 @@ parser.add_argument("--notes", default="", type=str, help="Extra notes that can 
 parser.add_argument("--placement", default=True, type=bool, help="Whether tket should optimize placement")
 parser.add_argument("--matroid", default=False, type=bool, help="Whether the algorithm should use matroid partitioning for synthesis, otherwise it uses gray synth.")
 parser.add_argument("--root_heuristic", nargs='+', default="recursive", choices=["recursive", "random", "exhaustive", "arity", "model"], help="Which root heuristic should be used by gray synth")
-parser.add_argument("--split_heuristic", nargs='+', default="count", choices=["random", "count", "arity"], help="Which split heuristic should be used by gray synth")
+parser.add_argument("--split_heuristic", nargs='+', default="count", choices=["random", "count", "arity", "count->arity"], help="Which split heuristic should be used by gray synth")
 #parser.add_argument("--zeroes_first", nargs='+', default=True, type=bool, help="Whether the recursive gray synth should recurse on zeroes first or not.")
 #parser.add_argument("-n", "--n_circuits", nargs='+', dest="n", default=20, type=int, help="The number of circuits to generate.")
 #parser.add_argument("-p", "--n_phase_layers", nargs='+', dest="phase_layers", default=1, type=int, help="Number of layers with phases in the circuits to be generated.")
@@ -186,11 +186,13 @@ def map_phase_poly_circuits(sources, architecture, modes, placement=True, **kwar
     return results_df
 
 def get_metrics(circuit):
+    metrics = {}
     if isinstance(circuit, Circuit):
         tk_circuit = pyzx_to_tk(circuit)
+        if hasattr(circuit, "n_gadgets"):
+            metrics["# Gadgets"] = circuit.n_gadgets
     else:
         tk_circuit = circuit
-    metrics = {}
     metrics["CX depth"] = tk_circuit.depth_by_type(OpType.CX)
     metrics["# CX"] = tk_circuit.n_gates_of_type(OpType.CX)
     metrics["Rz depth"] = tk_circuit.depth_by_type(OpType.Rz)

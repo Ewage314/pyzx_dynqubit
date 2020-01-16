@@ -51,6 +51,19 @@ def make_random_phase_poly(n_qubits, n_phase_layers, cnots_per_layer, return_cir
     else:
         return PhasePoly.fromCircuit(c)
 
+def make_random_phase_poly_from_gadgets(n_qubits, n_gadgets, return_circuit=False):
+    parities = set()
+    while len(parities) < n_gadgets:
+        parity = "".join(np.random.choice(["0", "1"], n_qubits))
+        if parity != "0"*n_qubits:
+            parities.add(parity)
+    zphase_dict = {"".join([str(int(i)) for i in p]):Fraction(1,4) for p in parities}
+    out_parities = mat22partition(Mat2.id(n_qubits))
+    phase_poly = PhasePoly(zphase_dict, out_parities)
+    if return_circuit:
+        return phase_poly.rec_gray_synth("gauss", architecture=None)[0]
+    return phase_poly
+
 
 def random_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs):
     root = np.random.choice(qubits)
@@ -82,10 +95,10 @@ def rec_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_
     return list(steiner_reduce_column(architecture, [row[column] for row in matrix.data], root, qubits, [i for i in range(architecture.n_qubits)], [], upper=True))
 
 def fixed_root_heuristic(root_order, architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs):
-    phase_qubit = root_order[column]
+    phase_qubit = int(root_order[column])
     return rec_root_heuristic(architecture, matrix, cols_to_use, qubits, column, phase_qubit, **kwargs)
 
-def model_root_heuristic(models, architecture, matrix, cols_to_use, qubits, column, phase_qubit, try_default=True, mode="steiner", split_heuristic="count", **kwargs):
+def model_root_heuristic(models, architecture, matrix, cols_to_use, qubits, column, phase_qubit, try_default=False, mode="steiner", split_heuristic="count", **kwargs):
     model = None
     # Pick the right model
     for m in models:
@@ -154,6 +167,18 @@ def arity_split_heuristic(architecture, matrix, cols_to_use, qubits, **kwargs):
 def count_split_heuristic(architecture, matrix, cols_to_use, qubits, **kwargs):
     return qubits
 
+def count_arity_split_heuristic(architecture, matrix, cols_to_use, qubits, phase_qubit=None, **kwargs):
+    counts = [max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1,0]], default=-1) for q in qubits]
+    best = max(counts)
+    qubits = [q for count, q in zip(counts,qubits) if count == best]
+    #print("tie break:", len(qubits))
+    if phase_qubit is None:
+        return arity_split_heuristic(architecture, matrix, cols_to_use, qubits, **kwargs)
+    else:
+        distances = architecture.distances["upper"][0]
+        chosen_qubit = min(qubits, key=lambda q: distances[(q, phase_qubit)][0])
+        return [chosen_qubit]
+
 
 class PhasePoly():
 
@@ -167,7 +192,8 @@ class PhasePoly():
     split_heuristics = {
         "random": random_split_heuristic,
         "arity": arity_split_heuristic,
-        "count": count_split_heuristic
+        "count": count_split_heuristic,
+        "count->arity": count_arity_split_heuristic
     }
 
     def __init__(self, zphase_dict, out_parities, ps=None, train=False, root_order=None, models=None):
@@ -573,7 +599,7 @@ class PhasePoly():
                         # Ignore rows that are currently all 0s or all 1s
                         qubits = [i for i in range(n_qubits) if sum([matrix.data[i][j] for j in cols_to_use]) not in [0, len(cols_to_use)]]
                     # Pick the one with the best connectivity everywhere
-                    best_qubits = self.split_heuristics[split_heuristic](architecture, matrix, cols_to_use, qubits)
+                    best_qubits = self.split_heuristics[split_heuristic](architecture, matrix, cols_to_use, qubits, phase_qubit=phase_qubit)
                     # Pick the qubit where the recursion split will be most skewed.
                     chosen_row = max(best_qubits, key=lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1,0]], default=-1))
                     # Split the column into 1s and 0s in that row
@@ -595,6 +621,7 @@ class PhasePoly():
             for cnot in cnots.gates:
                 circuit.add_gate(cnot)
         # Return the circuit
+        circuit.n_gadgets = len(self.zphases.keys())
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
             

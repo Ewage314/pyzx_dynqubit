@@ -11,8 +11,8 @@ from ..linalg import Mat2
 from ..circuit import Fraction
 
 def main(*args):
-    architecture = create_architecture("ibm_qx2")
-    n_columns_list = [4]
+    architecture = create_architecture("line", n_qubits=5)
+    n_columns_list = [2,3,4]
     for n_columns in n_columns_list:
         print("Phase polynomials with", n_columns, "phase gadgets:")
         features_file = architecture.name + "_features_" + str(n_columns)+".npy"
@@ -31,39 +31,42 @@ def train(architecture, n_columns):
     print("Data samples, polynomial size", y.shape)
     # Train model
     print("Training model")
-    #model = RandomForestClassifier(n_estimators=100, max_depth=None, n_jobs=-1)
-    #model = ExtraTreesClassifier(n_estimators=100, max_depth=None, n_jobs=-1)
-    model = tree.DecisionTreeClassifier()
+    model = RandomForestClassifier(n_estimators=100, max_depth=None, n_jobs=-1, oob_score=True)
+    #model = ExtraTreesClassifier(n_estimators=100, max_depth=None, n_jobs=-1, oob_score=True)
+    #model = tree.DecisionTreeClassifier()
     model = model.fit(data, y)
     with open(architecture.name + "_model_" + str(n_columns)+".pickle", "wb") as f:
         pickle.dump(model, f)
         pass
     # Test model
-    print("Testing model on train data")
-    # TODO generate new data for generalisation testing
-    n_perfect = 0
-    n_better = 0
-    n_same = 0
-    for features, root_order in zip(data, y):
-        # Find the best root order for each phase polynomial by exhaustive search
-        parities = features.reshape(n_columns, n_qubits)
-        zphase_dict = {"".join([str(int(i)) for i in p]):Fraction(1,4) for p in parities}
-        out_parities = mat22partition(Mat2.id(n_qubits))
-        # Generate all possible orders
-        options = [root_order, model.predict([features])[0], None]
-        counts = []
-        for i, root_order in enumerate(options):
-            phase_poly = PhasePoly(zphase_dict, out_parities, root_order=root_order)
-            root_heuristic = "recursive" if root_order is None else "fixed"
-            circuit = phase_poly.rec_gray_synth("steiner", architecture, split_heuristic="count", root_heuristic=root_heuristic)[0]
-            counts.append(circuit.count_cnots())
-        if counts[0] == counts[1]:
-            n_perfect += 1
-        if counts[1] == counts[2]:
-            n_same += 1
-        if counts[1] < counts[2]:
-            n_better += 1
-    print(n_perfect, n_better, n_same)
+    if hasattr(model, "oob_score_"):
+        print("Oob score:", model.oob_score_)
+    else:
+        print("Testing model on train data")
+        # TODO generate new data for generalisation testing
+        n_perfect = 0
+        n_better = 0
+        n_same = 0
+        for features, root_order in zip(data, y):
+            # Find the best root order for each phase polynomial by exhaustive search
+            parities = features.reshape(n_columns, n_qubits)
+            zphase_dict = {"".join([str(int(i)) for i in p]):Fraction(1,4) for p in parities}
+            out_parities = mat22partition(Mat2.id(n_qubits))
+            # Generate all possible orders
+            options = [root_order, model.predict([features])[0], None]
+            counts = []
+            for i, root_order in enumerate(options):
+                phase_poly = PhasePoly(zphase_dict, out_parities, root_order=root_order)
+                root_heuristic = "recursive" if root_order is None else "fixed"
+                circuit = phase_poly.rec_gray_synth("steiner", architecture, split_heuristic="count", root_heuristic=root_heuristic)[0]
+                counts.append(circuit.count_cnots())
+            if counts[0] == counts[1]:
+                n_perfect += 1
+            if counts[1] == counts[2]:
+                n_same += 1
+            if counts[1] < counts[2]:
+                n_better += 1
+        print(n_perfect, n_better, n_same)
 
     n_better = 0
     n_same = 0
@@ -101,16 +104,27 @@ def create_dataset(architecture, n_columns):
     print("Creating dataset")
     n_qubits = architecture.n_qubits
     temp = [[0,1]]*(n_qubits - 2)
-    parities = list(itertools.product(*temp))
-    perm = np.random.permutation(parities) # Drop the full zero parity
+    parities = np.asarray(list(itertools.product(*temp)))
     data = []
-    for _ in range(10):
-        qubits = np.random.choice(n_qubits, 2, replace=False)
-        indices = [j for j in range(n_qubits) if j not in qubits]
-        for i in range(0, len(perm)-n_columns, n_columns):
-            sample = np.ones((n_columns, n_qubits))
-            sample[:, indices] = perm[i:i+n_columns]
-            data.append(sample)
+    if n_qubits > 10:
+        perm = np.random.permutation(parities) # Drop the full zero parity
+        for _ in range(1):
+            qubits = np.random.choice(n_qubits, 2, replace=False)
+            indices = [j for j in range(n_qubits) if j not in qubits]
+            for i in range(0, len(perm)-n_columns, n_columns):
+                sample = np.ones((n_columns, n_qubits))
+                sample[:, indices] = perm[i:i+n_columns]
+                data.append(sample)
+    else:
+        for _ in range(10):
+            qubits = np.random.choice(n_qubits, 2, replace=False)
+            indices = [j for j in range(n_qubits) if j not in qubits]
+            for _ in range(60):
+                parity_choices = np.random.choice(parities.shape[0], n_columns, replace=False)
+                sample = np.ones((n_columns, n_qubits), dtype=np.int)
+                sample[:, indices] = parities[parity_choices]
+                data.append(sample)
+
     data = np.asarray(data)
     print("Generated phase polynomials of shape:", data.shape)
     y = []
