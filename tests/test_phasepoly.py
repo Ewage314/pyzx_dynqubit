@@ -244,7 +244,7 @@ class TestPhasePoly(unittest.TestCase):
     
     def do_phase_poly(self, circuit, mode, architecture, routed=False, tensor_compare=False):
         phase_poly = PhasePoly.fromCircuit(circuit)
-        for func in [phase_poly.matroid_synth, phase_poly.gray_synth, phase_poly.rec_gray_synth]:
+        for func in [phase_poly.matroid_synth, phase_poly.gray_synth, phase_poly.rec_gray_synth, phase_poly.Ariannes_synth]:
             with self.subTest(i=func):
                 # Check the synthesized circuit
                 new_circuit, initial_perm, output_perm = func(mode=mode, architecture=architecture, full_reduce=True)
