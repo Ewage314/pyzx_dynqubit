@@ -8,7 +8,7 @@ import numpy as np
 
 from pyzx.linalg import Mat2
 from pyzx.routing.cnot_mapper import gauss, STEINER_MODE, GAUSS_MODE, GENETIC_STEINER_MODE, PSO_STEINER_MODE, cnot_fitness_func, sequential_gauss
-from pyzx.routing.architecture import create_architecture, REC_ARCH, SQUARE
+from pyzx.routing.architecture import create_architecture, REC_ARCH, SQUARE, IBMQ_SINGAPORE
 from pyzx.parity_maps import CNOT_tracker, build_random_parity_map
 from pyzx.machine_learning import GeneticAlgorithm
 from pyzx.circuit import CNOT
@@ -19,10 +19,9 @@ SEED = 42
 class TestSteiner(unittest.TestCase):
 
     def setUp(self):
-        self.n_qubits = 9
-        name = "line"
         self.n_tests = 5
-        self.arch = create_architecture(name, n_qubits=self.n_qubits)
+        self.arch = create_architecture(IBMQ_SINGAPORE)
+        self.n_qubits = self.arch.n_qubits
         depth = 20
         self.circuit = [CNOT_tracker(self.arch.n_qubits) for _ in range(self.n_tests)]
         np.random.seed(SEED)
@@ -70,7 +69,8 @@ class TestSteiner(unittest.TestCase):
 
     def test_full_shortest_path(self):
         # Get the stored distances
-        full = self.arch.distances["full"]
+        arch = create_architecture(SQUARE, n_qubits=self.n_qubits)
+        full = arch.distances["full"]
         # check shortest path between two bits in the architecture
         for root in range(self.n_qubits):
             for v1 in range(root+1):
