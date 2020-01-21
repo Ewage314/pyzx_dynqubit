@@ -648,6 +648,10 @@ class PhasePoly():
                 recurse(cols0, [q for q in qubits_to_use if q != chosen_row])
                 
                 neighbors = [q for q in architecture.get_neighboring_qubits(chosen_row) if q in qubits_to_use ]
+                if neighbors == []:
+                    print(qubits_to_use, chosen_row)
+                    print(matrix)
+                    exit(42)
                 chosen_neighbor = max(neighbors, key=lambda q: len([col for col in cols_to_use if matrix.data[q][col] == 1]))
                 # Place CNOTs if you still need to extract columns
                 #print(qubits_to_use, chosen_row, chosen_neighbor)

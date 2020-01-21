@@ -35,9 +35,14 @@ RIGETTI_19Q_ACORN = "rigetti_19q_acorn"
 RIGETTI_16Q_ASPEN = "rigetti_16q_aspen"
 RIGETTI_8Q_AGAVE = "rigetti_8q_agave"
 REC_ARCH = "recursive_architecture"
+SYCAMORE_LIKE = "sycamore_like"
+IBMQ_POUGHKEEPSIE = "ibmq_poughkeepsie"
+IBMQ_SINGAPORE = "ibmq_singapore"
+IBMQ_BOEBLINGEN  = "ibmq_boeblingen"
 
 architectures = [SQUARE, CIRCLE, FULLY_CONNNECTED, LINE, IBM_QX4, IBM_QX2, IBM_QX3, 
-                IBM_QX5, IBM_Q20_TOKYO, RIGETTI_8Q_AGAVE, RIGETTI_16Q_ASPEN, RIGETTI_19Q_ACORN, REC_ARCH]
+                IBM_QX5, IBM_Q20_TOKYO, RIGETTI_8Q_AGAVE, RIGETTI_16Q_ASPEN, RIGETTI_19Q_ACORN, 
+                REC_ARCH, SYCAMORE_LIKE, IBMQ_POUGHKEEPSIE, IBMQ_BOEBLINGEN, IBMQ_SINGAPORE]
 dynamic_size_architectures = [FULLY_CONNNECTED, LINE, CIRCLE, SQUARE]
 
 debug = False
@@ -72,7 +77,8 @@ class Architecture():
         else:
             self.qubit_map = [i for i, v in enumerate(self.vertices)]
         self.n_qubits = len(self.vertices)
-        self.pre_calc_non_cutting_vertices()
+        self._non_cutting_vertices = None
+        #self.pre_calc_non_cutting_vertices()
         self.reduce_order = reduce_order if reduce_order is not None else [i-1 for i in range(self.n_qubits, 0,-1)]
         self.arities = [(i, len([edge for edge in self.graph.edges() if edge[0] == v])) for i,v in enumerate(self.vertices)]
         self.arities.sort(key=lambda p: p[1], reverse=True)
@@ -98,13 +104,29 @@ class Architecture():
             return all_non_cutting
         self._non_cutting_vertices = collect_non_cutting(qubits)
     
-    def non_cutting_vertices(self, subgraph):
+    def non_cutting_vertices(self, subgraph, pre_calc=False):
         # Find the precalculated non-cutting vertices for this subgraph
-        if subgraph == []:
-            return []
-        subgraphs, non_cutting = zip(*self._non_cutting_vertices)
-        index = subgraphs.index(subgraph)
-        return non_cutting[index]
+        if pre_calc:
+            if self._non_cutting_vertices is None:
+                self.pre_calc_non_cutting_vertices()
+            if subgraph == []:
+                return []
+            subgraphs, non_cutting = zip(*self._non_cutting_vertices)
+            index = subgraphs.index(subgraph)
+            return non_cutting[index]
+        else:
+            if self._non_cutting_vertices is None:
+                self._non_cutting_vertices = {}
+            cur_dict = self._non_cutting_vertices
+            for q in sorted([v for i, v in enumerate(self.vertices) if i not in subgraph]):
+                if q not in cur_dict.keys():
+                    cur_dict[q] = {}
+                cur_dict = cur_dict[q]
+            if "non_cutting" not in cur_dict.keys():
+                cur_dict["non_cutting"] = [subgraph[i] for i, cutting in enumerate(self._is_cutting(qubits=[self.vertices[i] for i in subgraph])) if not cutting]
+            #print(self._non_cutting_vertices)
+            return cur_dict["non_cutting"]
+
 
 
     def _is_cutting(self, qubits=None):
@@ -118,6 +140,7 @@ class Architecture():
         index_lookup = {self.vertices[v]:i for i, v in enumerate(qubits)}
         self.dfs_counter = 0
         edges = [e for e in self.graph.edges() if e[0] in qubits and e[1] in qubits]
+        edges += [(v2, v1) for v1, v2 in edges]
         cutting = [False] * n_qubits
         parent = [-1] * n_qubits
         def dfs(vertex,):
@@ -554,6 +577,29 @@ def create_ibm_q20_tokyo_architecture(backend=None, **kwargs):
     graph.add_edges(edges)
     return Architecture(name=IBM_Q20_TOKYO, coupling_graph=graph, backend=backend, **kwargs)
 
+def create_ibmq_poughkeepsie(backend=None, **kwargs):
+    graph = Graph(backend=backend)
+    vertices = graph.add_vertices(20)
+    edges = connect_vertices_in_line(vertices)
+    cross_edges = [
+        (0,5), (7,1), (5,14), (10,19)
+    ]
+    edges.extend([(vertices[v1], vertices[v2]) for v1, v2 in cross_edges])
+    graph.add_edges(edges)
+    return Architecture(name=IBMQ_POUGHKEEPSIE, coupling_graph=graph, backend=backend, **kwargs)
+
+def create_ibmq_singapore(backend=None, name=None, **kwargs):
+    graph = Graph(backend=backend)
+    vertices = graph.add_vertices(20)
+    edges = connect_vertices_in_line([v for i, v in enumerate(vertices) if i not in [3, 15]])
+    cross_edges = [(1,11), (3, 4), (5, 10), (9,14), (15, 16), (8,18)]
+    edges.extend([(vertices[v1], vertices[v2]) for v1, v2 in cross_edges])
+    graph.add_edges(edges)
+    reduce_order = [19, 18, 17, 15, 16, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 3, 4, 2, 1, 0]
+    if name is not None:
+        return Architecture(name=IBMQ_BOEBLINGEN, coupling_graph=graph, backend=backend, reduce_order=reduce_order, **kwargs)
+    return Architecture(name=IBMQ_SINGAPORE, coupling_graph=graph, backend=backend, reduce_order=reduce_order, **kwargs)
+
 def create_rigetti_19q_acorn_architecture(backend=None, **kwargs):
     graph = Graph(backend=backend)
     vertices = graph.add_vertices(20)
@@ -572,6 +618,16 @@ def create_rigetti_16q_aspen_architecture(backend=None, **kwargs):
     edges += [(vertices[v1], vertices[v2]) for v1, v2 in extra_edges]
     graph.add_edges(edges)
     return Architecture(RIGETTI_16Q_ASPEN, coupling_graph=graph, backend=backend, **kwargs)
+
+def create_sycamore_like(backend=None, **kwargs):
+    graph = Graph(backend=backend)
+    vertices = list(graph.add_vertices(20))
+    line = vertices[:1]+vertices[2:4]+vertices[5:13]+vertices[14:17]+vertices[18:]
+    edges = connect_vertices_in_line(line)
+    extra_edges = [(1,2),(2,6), (4,5), (4,14),(5,12), (6,11), (7,10), (13,14), (12,16), (11,18), (10,17), (17,18)]
+    edges += [(vertices[v1], vertices[v2]) for v1, v2 in extra_edges]
+    graph.add_edges(edges)
+    return Architecture(SYCAMORE_LIKE, coupling_graph=graph, backend=backend, reduce_order=[19, 17, 18, 16,15,13,14,12,11,10,9,8,7,6,4,5,3,1,2,0], **kwargs)
 
 def create_rigetti_8q_agave_architecture(**kwargs):
     m = np.array([
@@ -617,6 +673,11 @@ def create_architecture(name, **kwargs):
     # IBM architectures are currently ignoring CNOT direction.
     if isinstance(name, Architecture):
         return name
+    arch_dict = {}
+    arch_dict[SYCAMORE_LIKE] = create_sycamore_like
+    arch_dict[IBMQ_POUGHKEEPSIE] = create_ibmq_poughkeepsie
+    arch_dict[IBMQ_SINGAPORE] = create_ibmq_singapore
+    arch_dict[IBMQ_BOEBLINGEN] = lambda **kwargs : create_ibmq_singapore(name=IBMQ_BOEBLINGEN, **kwargs)
     if name == SQUARE:
         return create_square_architecture(**kwargs)
     elif name == LINE:
@@ -643,6 +704,8 @@ def create_architecture(name, **kwargs):
         return create_rigetti_8q_agave_architecture(**kwargs)
     elif name == REC_ARCH:
         return create_recursive_architecture(**kwargs)
+    elif name in arch_dict.keys():
+        return arch_dict[name](**kwargs)
     else:
         raise KeyError("name" + str(name) + "not recognized as architecture name. Please use one of", *architectures)
 

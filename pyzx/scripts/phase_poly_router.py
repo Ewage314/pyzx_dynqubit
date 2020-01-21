@@ -187,12 +187,14 @@ def map_phase_poly_circuits(sources, architecture, modes, placement=True, **kwar
 
 def get_metrics(circuit):
     metrics = {}
+    n_gadgets = None
     if isinstance(circuit, Circuit):
         tk_circuit = pyzx_to_tk(circuit)
         if hasattr(circuit, "n_gadgets"):
-            metrics["# Gadgets"] = circuit.n_gadgets
+            n_gadgets = circuit.n_gadgets
     else:
         tk_circuit = circuit
+    metrics["# Gadgets"] = n_gadgets
     metrics["CX depth"] = tk_circuit.depth_by_type(OpType.CX)
     metrics["# CX"] = tk_circuit.n_gates_of_type(OpType.CX)
     metrics["Rz depth"] = tk_circuit.depth_by_type(OpType.Rz)
