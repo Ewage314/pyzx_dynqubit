@@ -161,6 +161,7 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
                     nodes = [r for r in rows if r==rows[pivot] or matrix.data[r][c] == 1]
                     usable_nodes = cols[i:]
                     rec_nodes = list(set([node for edge in architecture.distances["upper"][c][(max(usable_nodes),c)][1] for node in edge]))
+                    rec_nodes = [n for n in usable_nodes if n in rec_nodes]
                         
                     if len(nodes) > 1:
                         steiner_reduce(c, rows[pivot], nodes, usable_nodes, rec_nodes, False)
