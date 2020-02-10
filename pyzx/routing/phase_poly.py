@@ -24,7 +24,7 @@ from ..parity_maps import build_random_parity_map, CNOT_tracker
 from ..graph.graph import  Graph
 from ..linalg import Mat2
 from ..routing.cnot_mapper import sequential_gauss, GAUSS_MODE, STEINER_MODE, TKET_COMPILER, gauss
-from ..routing.tket_router import get_tk_architecture, pyzx_to_tk, graph_placement, OpType
+from ..routing.tket_router import get_tk_architecture, pyzx_to_tk, Placement, OpType
 from ..routing.steiner import steiner_reduce_column
 from ..routing.architecture import create_architecture, FULLY_CONNNECTED
 from ..utils import make_into_list
@@ -33,7 +33,8 @@ TKET_STEINER_MODE = "tket-steiner"
         
 def route_phase_poly(circuit, architecture, mode, do_matroid=False, split_heuristic="count", root_heuristic="recursive", ps=None, models=None, **kwargs):
     phase_poly = PhasePoly.fromCircuit(circuit, ps=ps, models=models)
-    if do_matroid == True:
+    print(do_matroid)
+    if do_matroid == "True":
         new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
     elif do_matroid == "arianne":
         new_circuit = phase_poly.Ariannes_synth(mode, architecture, **kwargs)[0]
@@ -401,6 +402,8 @@ class PhasePoly():
 
     def matroid_synth(self, mode, architecture, optimize_parity_order=False, optimize_partition_order=True, iterative_placement=False, parity_permutation=True, iterative_initial_placement=False, **kwargs):
         kwargs["full_reduce"] = True
+        if mode == TKET_STEINER_MODE:
+            raise NotImplementedError("The tket graph-placement is not supported any more due to update of tket version.")
         n_qubits = architecture.n_qubits if architecture is not None else len(self.out_par)
         # Partition and order the parities
         partitions = self.partition(optimize_parity_order=optimize_parity_order)+[self.out_par]
@@ -416,6 +419,7 @@ class PhasePoly():
             other_matrices.append(new_matrix*prev_matrix) 
             prev_matrix = inverse
         if mode == TKET_STEINER_MODE:
+            print("hi!")
             #print(len(partitions))
             perms = []
             # TODO - this can be made more memory/time efficient by doing it in reverse.
@@ -449,7 +453,9 @@ class PhasePoly():
                     if iterative_placement or idx == 0:
                         # Get a better qubit placement from tket
                         tk_circuit = pyzx_to_tk(circuit)
-                        new_perm = graph_placement(tk_circuit, arch)
+                        # TODO Call graph_placement from pytket.routing.Placement class, which requires a Device in stead of an Architecture.
+                        new_perm = None #graph_placement(tk_circuit, arch)
+                        print("check")
                         # Parse the placement into a np.array permutation
                         perm_dict = {p[1].index[0]: p[0].index[0] for p in new_perm.items()} 
                         #suggestions.append((perm_dict, current_perm, next_perm, circuit.gates[:len(temp_CNOT_circuits[0].gates)]))
