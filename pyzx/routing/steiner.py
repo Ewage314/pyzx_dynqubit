@@ -160,11 +160,13 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
                 if c in p_cols:
                     nodes = [r for r in rows if r==rows[pivot] or matrix.data[r][c] == 1]
                     usable_nodes = cols[i:]
-                    rec_nodes = list(set([node for edge in architecture.distances["upper"][c][(max(usable_nodes),c)][1] for node in edge]))
-                    rec_nodes = [n for n in usable_nodes if n in rec_nodes]
-                        
+                    #rec_nodes = list(set([node for edge in architecture.distances["upper"][c][(max(usable_nodes),c)][1] for node in edge]))
+                    #rec_nodes = [n for n in usable_nodes if n in rec_nodes]
+                    rec_nodes = architecture.shortest_path(c, max(usable_nodes), usable_nodes) 
+
                     if len(nodes) > 1:
-                        steiner_reduce(c, rows[pivot], nodes, usable_nodes, rec_nodes, False)
+                        print("-", c, nodes, cols, rec_nodes)
+                        steiner_reduce(c, rows[pivot], nodes, cols, rec_nodes, False)
                         
                     # Do recursion on the given nodes.
                     if len(rec_nodes) > 1:
@@ -173,7 +175,7 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
         #return rank
     qubit_order = architecture.reduce_order
     rec_step(qubit_order, list(reversed(qubit_order)))
-    
+    print("Done!")
 
 def steiner_reduce_column(architecture, col, root, nodes, usable_nodes, rec_nodes, upper):
     steiner_tree = architecture.rec_steiner_tree(root, nodes, usable_nodes, rec_nodes, upper)

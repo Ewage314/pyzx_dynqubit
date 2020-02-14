@@ -39,11 +39,12 @@ SYCAMORE_LIKE = "sycamore_like"
 IBMQ_POUGHKEEPSIE = "ibmq_poughkeepsie"
 IBMQ_SINGAPORE = "ibmq_singapore"
 IBMQ_BOEBLINGEN  = "ibmq_boeblingen"
+DENSITY = "dynamic_density"
 
-architectures = [SQUARE, CIRCLE, FULLY_CONNNECTED, LINE, IBM_QX4, IBM_QX2, IBM_QX3, 
+architectures = [SQUARE, CIRCLE, FULLY_CONNNECTED, LINE, DENSITY, IBM_QX4, IBM_QX2, IBM_QX3, 
                 IBM_QX5, IBM_Q20_TOKYO, RIGETTI_8Q_AGAVE, RIGETTI_16Q_ASPEN, RIGETTI_19Q_ACORN, 
                 REC_ARCH, SYCAMORE_LIKE, IBMQ_POUGHKEEPSIE, IBMQ_BOEBLINGEN, IBMQ_SINGAPORE]
-dynamic_size_architectures = [FULLY_CONNNECTED, LINE, CIRCLE, SQUARE]
+dynamic_size_architectures = [FULLY_CONNNECTED, LINE, CIRCLE, SQUARE, DENSITY]
 
 debug = False
 
@@ -82,10 +83,16 @@ class Architecture():
         self.reduce_order = reduce_order if reduce_order is not None else [i-1 for i in range(self.n_qubits, 0,-1)]
         self.arities = [(i, len([edge for edge in self.graph.edges() if edge[0] == v])) for i,v in enumerate(self.vertices)]
         self.arities.sort(key=lambda p: p[1], reverse=True)
+        self.density = 2*self.graph.nedges/(self.n_qubits*(self.n_qubits-1))
 
     def pre_calc_distances(self):
         self.distances = {"upper": [self.floyd_warshall(until, upper=True) for until, v in enumerate(self.vertices)],
                           "full": [self.floyd_warshall(until, upper=False) for until, v in enumerate(self.vertices)]}
+
+    def _density(self):
+        import networkx as nx
+        g = nx.from_edgelist(self.graph.edges())
+        return nx.density(g)
 
     def pre_calc_non_cutting_vertices(self):
         # TODO implement this and uncomment line in constructor.
@@ -235,6 +242,42 @@ class Architecture():
                                                        distances[(v2, v1)][1] + distances[(v1, v0)][1])
         return distances
 
+    def shortest_path(self, start, end, subgraph=None):
+        #print("shortest path")
+        if subgraph is None:
+            nodes = self.vertices
+        else: 
+            nodes = [self.vertices[n] for n in subgraph]
+        start = self.vertices[start]
+        end = self.vertices[end]
+
+        queue = [(start, [start])] 
+        visited = [start]
+        debug_trace = [queue[0]]
+  
+        while queue != []: 
+            
+            node, path = queue.pop() 
+            if node == end:
+                #print(start, end, subgraph)
+                #self.visualize("debug.png")
+                #print(path)
+                return path
+            edges = [edge for edge in self.graph.edges() if node in edge]
+            neighbors = [n for edge in edges for n in edge if n != node and n in nodes]
+            #print(node, neighbors)
+            for node in neighbors: 
+                if node not in visited: 
+                    queue.append((node, path + [node]))
+                    visited.append(node)
+                    debug_trace.append(queue[-1])
+        print(start, end, subgraph)
+        print(*self.graph.edges())
+        print("Trace:", *debug_trace, sep="\n")
+        self.visualize("debug.png")
+        print(self.name)
+        return None
+
     def steiner_tree(self, start, nodes, upper=True):
         """
         Approximates the steiner tree given the architecture, a root qubit and the other qubits that should be present.
@@ -340,6 +383,13 @@ class Architecture():
 
     def rec_steiner_tree(self, start, nodes, usable_nodes, rec_nodes, upper=True):
         # Builds the steiner tree with start as root, contains at least nodes and at most useable_nodes
+        debug_trace = {
+            "start":start,
+            "nodes": nodes,
+            "usable nodes": usable_nodes,
+            "rec nodes": rec_nodes,
+            "upper": upper
+        }
         start = self.qubit_map[start]
         usable_nodes = [self.qubit_map[i] for i in usable_nodes]
         nodes = [self.qubit_map[i] for i in nodes]
@@ -384,6 +434,10 @@ class Architecture():
                 print(distances)
                 print(usable_nodes)
                 print(rec_nodes)
+                print(self.reduce_order)
+                print(debug_trace)
+                self.visualize("debug.png")
+                print(self.name)
             best_option = min(options, key=lambda x: x[2])
             vertices.append(best_option[0])
             edges += best_option[3]
@@ -667,6 +721,87 @@ def create_fully_connected_architecture(n_qubits=None, **kwargs):
     name = dynamic_size_architecture_name(FULLY_CONNNECTED, n_qubits)
     return Architecture(name, coupling_matrix=m, **kwargs)
 
+def create_dynamic_density_hamiltonian_architecture(n_qubits, density_prob=0.1, backend=None, **kwargs):
+    graph = Graph(backend=backend)
+    vertices = graph.add_vertices(n_qubits)
+    edges = connect_vertices_in_line(vertices)
+    n_edges = int(density_prob*n_qubits*(n_qubits-1)/2) - n_qubits+1 # Number of edges still to add.
+    if n_edges > 0:
+        possible_edges = [(v1, v2) for i, v1 in enumerate(vertices) for v2 in vertices[i+2:]]
+        indices = np.random.choice(len(possible_edges), n_edges, replace=False)
+        edges.extend([possible_edges[i] for i in indices])
+    graph.add_edges(edges)
+    name = dynamic_size_architecture_name(DENSITY+str(density_prob), n_qubits)
+    return Architecture(name=name, coupling_graph=graph, backend=backend, **kwargs)
+
+
+def create_dynamic_density_architecture(n_qubits, density_prob=0.1, backend=None, **kwargs):
+    # raise NotImplementedError("This version is not fully implemented. please use create_dynamic_density_hamiltonian_architecture()")
+    import networkx as nx
+    # Generate a random graph
+    graph = nx.gnp_random_graph(n_qubits, density_prob)
+    # Make sure it is connected
+    connectivity = nx.all_pairs_node_connectivity(graph)
+    disconnected = [(v1, v2) for v1,d in connectivity.items() for v2, score in d.items() if score == 0]
+    while disconnected != []:
+        to_add = np.random.choice(len(disconnected))
+        graph.add_edge(*disconnected[to_add])
+        connectivity = nx.all_pairs_node_connectivity(graph)
+        disconnected = [(v1, v2) for v1,d in connectivity.items() for v2, score in d.items() if score == 0]
+    # Number the edges
+    numbered = {}
+    numbered = {v:i for i,v in enumerate(nx.dfs_postorder_nodes(graph))}
+    # Make the coupling graph and adjust the numbering
+    m = nx.to_numpy_array(graph)
+    perm = [numbered[i] for i in range(n_qubits)]
+    perm = [perm.index(i) for i in range(n_qubits)]
+    m = m[perm][:, perm]
+    # Find the reduce order
+    """
+    g = nx.convert_matrix.from_numpy_array(m)
+    reduce_order = []
+    successors = nx.dfs_successors(g, source=0)
+    def ordered_dfs(node):
+        if node not in successors.keys(): # leaf node
+            return [node]
+        else:
+            children = successors[node]
+            return sum([ordered_dfs(child) for child in sorted(children, reverse=True)], []) + [node]
+    reduce_order = ordered_dfs(0)
+    """
+    spanning_tree = nx.dfs_tree(graph)
+    print(*[[numbered[n] for n in edge] for edge in spanning_tree.edges()])
+    g = Graph(backend=backend)
+    vertices = g.add_vertices(n_qubits)
+    g.add_edges([(vertices[v1], vertices[v2]) for v1, v2 in [[numbered[n] for n in edge] for edge in spanning_tree.edges()]])
+    arch = Architecture(name="temp", coupling_graph=g, backend=backend, **kwargs)
+    subgraph = [i for i in range(n_qubits)]
+    reduce_order = []
+    while subgraph != []:
+        non_cutting = arch.non_cutting_vertices(subgraph)
+        node = max(non_cutting)
+        reduce_order.append(node)
+        subgraph.remove(node)
+    #arch.reduce_order = reduce_order
+    #reduce_order = []
+    name = dynamic_size_architecture_name(DENSITY+str(density_prob), n_qubits)
+    arch = Architecture(name, coupling_matrix=m, reduce_order=reduce_order, **kwargs)
+    """
+    subgraph = [i for i in range(n_qubits)]
+    reduce_order = []
+    while subgraph != []:
+        non_cutting = arch.non_cutting_vertices(subgraph)
+        node = max(non_cutting)
+        reduce_order.append(node)
+        subgraph.remove(node)
+    arch.reduce_order = reduce_order
+    """
+    #arch.visualize("dynamic.png")
+    #print(reduce_order)
+    #exit(42)
+    #return Architecture(name, coupling_matrix=m, reduce_order=reduce_order, **kwargs)
+    return arch
+
 def create_architecture(name, **kwargs):
     # Source Rigetti architectures: https://www.rigetti.com/qpu # TODO create the architectures from names in pyquil.list_quantum_computers() <- needs mapping
     # Source IBM architectures: http://iic.jku.at/files/eda/2018_tcad_mapping_quantum_circuit_to_ibm_qx.pdf​
@@ -678,6 +813,7 @@ def create_architecture(name, **kwargs):
     arch_dict[IBMQ_POUGHKEEPSIE] = create_ibmq_poughkeepsie
     arch_dict[IBMQ_SINGAPORE] = create_ibmq_singapore
     arch_dict[IBMQ_BOEBLINGEN] = lambda **kwargs : create_ibmq_singapore(name=IBMQ_BOEBLINGEN, **kwargs)
+    arch_dict[DENSITY] = create_dynamic_density_architecture
     if name == SQUARE:
         return create_square_architecture(**kwargs)
     elif name == LINE:
