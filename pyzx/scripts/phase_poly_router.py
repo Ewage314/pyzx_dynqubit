@@ -39,13 +39,14 @@ parser.add_argument("--subfolder", default=None, type=str, nargs="+", help="Poss
 parser.add_argument("--raw", default=False, type=bool, help="Whether the results should be raw or aggregated with mean/median/min/max")
 parser.add_argument("--notes", default="", type=str, help="Extra notes that can be added to the csv")
 parser.add_argument("--placement", default=True, type=bool, help="Whether tket should optimize placement")
-parser.add_argument("--matroid", default=False, choices=["True", False, "arianne", "both"], help="Whether the algorithm should use matroid partitioning for synthesis, otherwise it uses gray synth.")
-parser.add_argument("--root_heuristic", nargs='+', default="recursive", choices=["recursive", "random", "exhaustive", "arity", "model"], help="Which root heuristic should be used by gray synth")
+parser.add_argument("--matroid", nargs='+', default="gray", choices=["matroid", "gray", "arianne", "both"], help="Whether the algorithm should use matroid partitioning for synthesis, otherwise it uses gray synth.")
+parser.add_argument("--root_heuristic", nargs='+', default="recursive", choices=["recursive", "nash", "random", "exhaustive", "arity", "model"], help="Which root heuristic should be used by gray synth")
 parser.add_argument("--split_heuristic", nargs='+', default="count", choices=["random", "count", "arity", "count->arity"], help="Which split heuristic should be used by gray synth")
 #parser.add_argument("--zeroes_first", nargs='+', default=True, type=bool, help="Whether the recursive gray synth should recurse on zeroes first or not.")
 #parser.add_argument("-n", "--n_circuits", nargs='+', dest="n", default=20, type=int, help="The number of circuits to generate.")
 #parser.add_argument("-p", "--n_phase_layers", nargs='+', dest="phase_layers", default=1, type=int, help="Number of layers with phases in the circuits to be generated.")
 #parser.add_argument("-c", "--cnots_between_layers", nargs='+', dest="cnots", default=5, type=int, help="Number of CNOT gates between each phase layer in the circuits to be generated.")
+parser.add_argument("--density", nargs='+', type=float, help="The density probability for the dynamic_density architecture")
 
 #TODO add PSO arguments
 
@@ -92,36 +93,46 @@ def main(args):
     all_results = []
     for a in args.architecture:
         if a in dynamic_size_architectures:
-            archs = [create_architecture(a, n_qubits=q) for q in args.qubits]
+            if a == "dynamic_density":
+                archs = [create_architecture(a, n_qubits=q, density_prob=d) for q in args.qubits for d in args.density]
+            else:
+                archs = [create_architecture(a, n_qubits=q) for q in args.qubits]
         else:
             archs = [create_architecture(a)]
         for architecture in archs:
             root_heurs = make_into_list(args.root_heuristic)
             split_heurs = make_into_list(args.split_heuristic)
-            if args.matroid:
-                root_heurs = root_heurs[:1]
-                split_heurs = split_heurs[:1]
-            for root_heuristic in root_heurs:
-                models = None
-                if root_heuristic == "model":
-                    models = [pickle.load(open(filename, "rb")) for filename in glob.glob(architecture.name +"_model_"+"*.pickle")]
-                for split_heuristic in split_heurs:
-                        results_df = map_phase_poly_circuits(sources, architecture, mode, do_matroid=args.matroid, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
-                        if not args.raw:
-                            kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
-                            results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 
-                                                results_df.median(**kwargs).add_suffix("_median"), 
-                                                results_df.min(**kwargs).add_suffix("_min"), 
-                                                results_df.max(**kwargs).add_suffix("_max")], axis=1)
-                            #results_df["# phase layers"] = n_phase_layers
-                            #results_df["# cnots per layer"] = n_cnots_per_layer
-                            #results_df["architecture"] = architecture.name
-                            #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
-                        results_df["notes"] = args.notes 
-                        results_df["matroid"] = args.matroid
-                        results_df["root_heuristic"] = root_heuristic
-                        results_df["split_heuristic"] = split_heuristic 
-                        all_results.append(results_df)
+            synthesis_method = make_into_list(args.matroid)
+            for method in synthesis_method:
+                if method in ["matroid", "arianne"]:
+                    root_heurs2 = [""]
+                    split_heurs2 = [""]
+                else:
+                    root_heurs2 = root_heurs
+                    split_heurs2 = split_heurs
+                for root_heuristic in root_heurs2:
+                    models = None
+                    if root_heuristic == "model":
+                        models = [pickle.load(open(filename, "rb")) for filename in glob.glob(architecture.name +"_model_"+"*.pickle")]
+                    for split_heuristic in split_heurs:
+                            results_df = map_phase_poly_circuits(sources, architecture, mode, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
+                            if not args.raw:
+                                kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
+                                results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 
+                                                    results_df.median(**kwargs).add_suffix("_median"), 
+                                                    results_df.min(**kwargs).add_suffix("_min"), 
+                                                    results_df.max(**kwargs).add_suffix("_max")], axis=1)
+                                #results_df["# phase layers"] = n_phase_layers
+                                #results_df["# cnots per layer"] = n_cnots_per_layer
+                                #results_df["architecture"] = architecture.name
+                                #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
+                            results_df["notes"] = args.notes 
+                            results_df["matroid"] = method
+                            results_df["root_heuristic"] = root_heuristic
+                            results_df["split_heuristic"] = split_heuristic 
+                            results_df["arch_density"] = architecture.density
+                            results_df["architecture"] = architecture.name
+                            all_results.append(results_df)
         if args.metrics_csv and all_results != []:
             final_df = concat(all_results)
             if os.path.exists(args.metrics_csv):
@@ -131,7 +142,10 @@ def main(args):
                 final_df.to_csv(args.metrics_csv)
             all_results = []
     if not args.metrics_csv and all_results != []:
-        print(concat(all_results))
+        df = concat(all_results)
+        df.reset_index(inplace=True)
+        df["file"] = df["file"].str.replace("circuits/phasepoly/gadgets/20qubits/5gadgets/", "",regex=True)
+        print(df)
          
 
 def map_phase_poly_circuits(sources, architecture, modes, placement=True, **kwargs):
