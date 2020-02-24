@@ -29,10 +29,17 @@ from ..routing.steiner import steiner_reduce_column
 from ..routing.architecture import create_architecture, FULLY_CONNNECTED
 from ..utils import make_into_list
 
+from pytket.circuit import PauliExpBox, Pauli
+from pytket.circuit import Circuit as TketCircuit
+from pytket.transform import Transform
+
 TKET_STEINER_MODE = "tket-steiner"
         
 def route_phase_poly(circuit, architecture, mode, do_matroid="gray", split_heuristic="count", root_heuristic="recursive", ps=None, models=None, **kwargs):
-    phase_poly = PhasePoly.fromCircuit(circuit, ps=ps, models=models)
+    if isinstance(circuit, Circuit):
+        phase_poly = PhasePoly.fromCircuit(circuit, ps=ps, models=models)
+    else:
+        phase_poly = circuit
     new_circuit = None
     if do_matroid == "matroid":
         new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
@@ -63,11 +70,40 @@ def make_random_phase_poly(n_qubits, n_phase_layers, cnots_per_layer, return_cir
     else:
         return PhasePoly.fromCircuit(c)
 
+
+def make_random_phase_poly_approximate(n_qubits, n_CNOTs, n_phases, return_circuit=False):
+    c = CNOT_tracker(n_qubits)
+    cnot_count = 0
+    p = n_phases/(n_CNOTs+n_phases)
+    while cnot_count < n_CNOTs:
+        target = np.random.randint(n_qubits)
+        if np.random.rand() < p:
+            phase = np.random.choice([1,-1])*Fraction(1, int(np.random.choice([1,2,4])))
+            c.add_gate(ZPhase(target=target, phase=phase))
+        else: 
+            control = np.random.choice([i for i in range(n_qubits) if i != target])
+            c.add_gate(CNOT(control, target))
+            cnot_count += 1
+    if return_circuit:
+        return c
+    else:
+        return PhasePoly.fromCircuit(c)
+
 def make_random_phase_poly_from_gadgets(n_qubits, n_gadgets, return_circuit=False):
     parities = set()
-    for integer in np.random.choice(2**n_qubits-1, replace=False, size=n_gadgets):
-        parity = ("{0:{fill}"+str(n_qubits)+"b}").format(integer+1, fill='0', align='right')
-        parities.add(parity)
+    if n_gadgets > 2**n_qubits:
+        n_gadgets=n_qubits^3
+    if n_qubits < 26:
+        for integer in np.random.choice(2**n_qubits-1, replace=False, size=n_gadgets):
+            parities.add(integer+1)
+    elif n_qubits < 64:
+        while len(parities) < n_gadgets:
+            parities.add(np.random.randint(1, 2**n_qubits))
+    else:
+        while len(parities) < n_gadgets:
+            parities.add("".join(np.random.choice(["0", "1"], n_qubits, replace=True)))
+    if n_qubits < 64:
+        parities = [("{0:{fill}"+str(n_qubits)+"b}").format(integer, fill='0', align='right') for integer in parities]
     zphase_dict = {"".join([str(int(i)) for i in p]):Fraction(1,4) for p in parities}
     out_parities = mat22partition(Mat2.id(n_qubits))
     phase_poly = PhasePoly(zphase_dict, out_parities)
@@ -191,6 +227,7 @@ def count_arity_split_heuristic(architecture, matrix, cols_to_use, qubits, phase
     if phase_qubit is None:
         return arity_split_heuristic(architecture, matrix, cols_to_use, qubits, **kwargs)
     else:
+        if architecture.distances is None: architecture.pre_calc_distances()
         distances = architecture.distances["upper"][0]
         chosen_qubit = min(qubits, key=lambda q: distances[(q, phase_qubit)][0])
         return [chosen_qubit]
@@ -257,6 +294,17 @@ class PhasePoly():
         if final_qubit_placement is not None:
             current_parities = [ current_parities[i] for i in final_qubit_placement]
         return PhasePoly(zphases, current_parities, ps=ps, models=models)
+
+    def to_tket(self):
+        if self.out_par != mat22partition(Mat2.id(self.n_qubits)):
+            raise NotImplementedError("The linear transformtion part of the phase polynomial cannot yet be transformed into a tket circuit")
+        circuit = TketCircuit(self.n_qubits)
+        for parity, phase in self.zphases.items():
+            qubits = [i for i,s in enumerate(parity) if s == '1']
+            circuit.add_pauliexpbox(PauliExpBox([Pauli.Z]*len(qubits), phase), qubits)
+        # TODO add the linear combination part with CNOTs
+        Transform.DecomposeBoxes().apply(circuit)
+        return circuit
 
     def partition(self, skip_output_parities=True, optimize_parity_order=False):
         # Matroid partitioning based on wikipedia: https://en.wikipedia.org/wiki/Matroid_partitioning
@@ -506,6 +554,8 @@ class PhasePoly():
                     gate = ZPhase(target=target, phase=phase)
                     zphases.remove(parity)
                     circuit.add_gate(gate)
+        # Return the circuit
+        circuit.n_gadgets = len(self.zphases.keys())
         return circuit, perms[0], perms[-1]
 
     def gray_synth(self, mode, architecture, **kwargs):
@@ -558,6 +608,7 @@ class PhasePoly():
         # Calculate the final parity that needs to be added from the circuit and self.out_par
         self._obtain_final_parities(circuit, architecture, mode, **kwargs)
         # Return the circuit
+        circuit.n_gadgets = len(self.zphases.keys())
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
     def rec_gray_synth(self, mode, architecture, root_heuristic="recursive", split_heuristic="count", full=True, phase_qubit=None, **kwargs):
@@ -620,7 +671,7 @@ class PhasePoly():
         circuit.n_gadgets = len(self.zphases.keys())
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
-    def Ariannes_synth(self, mode, architecture, full=True, depth_aware=True, **kwargs):
+    def Ariannes_synth(self, mode, architecture, full=True, depth_aware=False, **kwargs):
         kwargs["full_reduce"] = True
         #print("------------ START! -----------------------")
         if architecture is None or GAUSS_MODE in mode:
@@ -635,6 +686,7 @@ class PhasePoly():
         matrix = Mat2([[int(parity[i]) for parity in parities_to_reach] for i in range(architecture.n_qubits)] )
         circuit = CNOT_tracker(architecture.n_qubits)
         self.cols_to_reach = self._check_columns(matrix, circuit, [i for i in range(len(parities_to_reach))], parities_to_reach)
+        self.prev_rows = None
         def place_cnot(control, target):
             # Place the CNOT on the circuit
             circuit.add_gate(CNOT(control, target))
@@ -645,37 +697,38 @@ class PhasePoly():
             #print()
             # Keep track of the parities in the circuit - normal elementary row operations
             self.cols_to_reach = self._check_columns(matrix, circuit, self.cols_to_reach, parities_to_reach)   
-        def recurse(cols_to_use, qubits_to_use, prev_rows=None):
+        def recurse(cols_to_use, qubits_to_use):
             # update cols_to_use with cols_to_reach
             cols_to_use = [c for c in cols_to_use if c in self.cols_to_reach]
             if qubits_to_use != [] and cols_to_use != []:
                 # Select edge qubits
                 qubits = architecture.non_cutting_vertices(qubits_to_use) 
-                if prev_rows is not None:
-                    remove_prev = [q for q in qubits if q in prev_rows]
+                if self.prev_rows is not None:
+                    remove_prev = [q for q in qubits if q in self.prev_rows]
                     if remove_prev != []:
                         qubits = remove_prev
                 # Pick the qubit where the recursion split will be most skewed.
-                chosen_row = max(qubits, key=lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1]], default=-1))
+                chosen_row = max(qubits, key=lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1, 0]], default=-1))
                 # Split the column into 1s and 0s in that row
                 cols1 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 1]
                 cols0 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 0]
-                recurse(cols0, [q for q in qubits_to_use if q != chosen_row], prev_rows=prev_rows)
+                recurse(cols0, [q for q in qubits_to_use if q != chosen_row])
                 
                 neighbors = [q for q in architecture.get_neighboring_qubits(chosen_row) if q in qubits_to_use ]
-                """
-                if prev_rows is not None:
-                    filtered_neighbors = [n for n in neighbors if n not in prev_rows]
+                #"""
+                overwrite = False if self.prev_rows is None else chosen_row in self.prev_rows
+                if self.prev_rows is not None and not overwrite:
+                    filtered_neighbors = [n for n in neighbors if n not in self.prev_rows]
                     if filtered_neighbors == []:
-                        prev_rows = []
+                        overwrite = True
                     else:
                         neighbors = filtered_neighbors
-                """
+                #"""
                 if neighbors == []:
                     print(qubits_to_use, chosen_row)
                     print(matrix)
                     exit(42)
-                chosen_neighbor = max(neighbors, key=lambda q: len([col for col in cols_to_use if matrix.data[q][col] == 1]))
+                chosen_neighbor = max(neighbors, key=lambda q: len([col for col in cols1 if matrix.data[q][col] == 1]))
                 # Place CNOTs if you still need to extract columns
                 #print(qubits_to_use, chosen_row, chosen_neighbor)
                 if sum([matrix.data[chosen_neighbor][c] for c in cols1]) != 0: # Check if adding the cnot is useful
@@ -685,18 +738,24 @@ class PhasePoly():
                     #    place_cnot(chosen_neighbor, chosen_row)
                 elif cols1 != []:
                     place_cnot(chosen_neighbor, chosen_row)
+                    place_cnot(chosen_row, chosen_neighbor)
                 # Split the column into 1s and 0s in that row
-                cols1 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 1]
-                cols0 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 0]
-                if prev_rows is not None:
-                    prev_rows.append(chosen_row)
-                recurse(cols0, [q for q in qubits_to_use if q != chosen_row], prev_rows=prev_rows)
-                recurse(cols1, qubits_to_use, prev_rows=prev_rows)
+                cols0 = [col for col in cols1 if matrix.data[chosen_row][col] == 0]
+                cols1 = [col for col in cols1 if matrix.data[chosen_row][col] == 1]
+                if self.prev_rows is not None:
+                    if overwrite:
+                        self.prev_rows = []
+                    self.prev_rows.append(chosen_row)
+                    self.prev_rows.append(chosen_neighbor)
+                recurse(cols0, [q for q in qubits_to_use if q != chosen_row])
+                recurse(cols1, qubits_to_use)
         if depth_aware:
-            recurse(self.cols_to_reach, [i for i in range(n_qubits)], [])        
+            self.prev_rows = []        
+            recurse(self.cols_to_reach, [i for i in range(n_qubits)])
         else:
             recurse(self.cols_to_reach, [i for i in range(n_qubits)])
         del self.cols_to_reach
+        del self.prev_rows
         if full:
             # Calculate the final parity that needs to be added from the circuit and self.out_par
            self._obtain_final_parities(circuit, architecture, mode, **kwargs)

@@ -9,10 +9,10 @@ if __name__ == '__main__':
 
 from ..routing.architecture import architectures, SQUARE, create_architecture, dynamic_size_architectures, FULLY_CONNNECTED
 from ..routing.cnot_mapper import STEINER_MODE, TKET_COMPILER, sequential_map_cnot_circuits, elim_modes, compiler_modes, GENETIC_STEINER_MODE, PSO_STEINER_MODE, GAUSS_MODE, sequential_gauss
-from ..routing.phase_poly import route_phase_poly, TKET_STEINER_MODE
+from ..routing.phase_poly import route_phase_poly, TKET_STEINER_MODE, make_random_phase_poly_approximate, make_random_phase_poly_from_gadgets, PhasePoly
 from ..utils import make_into_list, restricted_float
 from ..circuit import Circuit, ZPhase, CNOT
-from ..routing.tket_router import pyzx_to_tk, OpType, route_tket, tket_to_pyzx
+from ..routing.tket_router import pyzx_to_tk, OpType, route_tket, tket_to_pyzx, Transform
 from ..parity_maps import CNOT_tracker
 
 TKET_THEN_STEINER_MODE = "tket->steiner"
@@ -81,6 +81,15 @@ def main(args):
     sources = [source for source in sources if os.path.exists(source) or print("Warning, skipping non-existing source:", source)]
     sources = [os.path.join(source, f) for source in sources for f in os.listdir(source)]
     sources = [source for source in sources if os.path.isfile(source)]
+    circuits = [Circuit.from_qasm_file(f) for f in sources]
+    
+    if circuits == []:
+        n_circuits = int(input("No files found, how many circuits should be generated?"))
+        n_gadgets = [int(s) for s in input("How many cnots,phases should these circuits have? (space separate for multiple)").split(" ") if s != ""]
+        #n_gadgets = [[int(i) for i in s.split(",")] for s in input("How many cnots,phases should these circuits have? (space separate for multiple)").split(" ") if s != ""]
+        gen_circuits = {}
+    else:
+        gen_circuits = None
 
     if "all" in args.mode:
         mode = elim_modes + [TKET_COMPILER]
@@ -100,6 +109,15 @@ def main(args):
         else:
             archs = [create_architecture(a)]
         for architecture in archs:
+            if gen_circuits is not None:
+                if architecture.n_qubits not in gen_circuits:
+                    print("generating circuits for q=", architecture.n_qubits)
+                    phase_polies = [make_random_phase_poly_from_gadgets(architecture.n_qubits, g, False) for g in n_gadgets for _ in range(n_circuits)]
+                    #gen_circuits[architecture.n_qubits] = [phase_poly.rec_gray_synth(GAUSS_MODE, architecture, root_heuristic="nash")[0] for phase_poly in phase_polies]
+                    gen_circuits[architecture.n_qubits] = phase_polies
+                    #gen_circuits[architecture.n_qubits] = [make_random_phase_poly_approximate(architecture.n_qubits, cnots, phases, True) for cnots, phases in n_gadgets for _ in range(n_circuits)]
+                circuits = gen_circuits[architecture.n_qubits]
+            print("Synthesising circuits for architecture ", architecture.name)
             root_heurs = make_into_list(args.root_heuristic)
             split_heurs = make_into_list(args.split_heuristic)
             synthesis_method = make_into_list(args.matroid)
@@ -115,7 +133,11 @@ def main(args):
                     if root_heuristic == "model":
                         models = [pickle.load(open(filename, "rb")) for filename in glob.glob(architecture.name +"_model_"+"*.pickle")]
                     for split_heuristic in split_heurs:
-                            results_df = map_phase_poly_circuits(sources, architecture, mode, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
+                            if method == "arianne":
+                                m = ["steiner"]
+                            else:
+                                m = mode
+                            results_df = map_phase_poly_circuits(circuits, architecture, m, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
                             if not args.raw:
                                 kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
                                 results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 
@@ -126,31 +148,45 @@ def main(args):
                                 #results_df["# cnots per layer"] = n_cnots_per_layer
                                 #results_df["architecture"] = architecture.name
                                 #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
+                            if sources != []:
+                                files = [sources[i] for i in results_df["idx"]]
+                            else:
+                                files = ["GENERATED" for i in results_df["idx"]]
+                            matches = [re.search('/(\d+)layers(\d+)cnots', file) for file in files]
+                            results_df["file"] = files
+                            results_df["#phase_layers"], results_df["#cnots_per_layer"] = zip(*[(None, None) if match is None else (int(match.group(1)),int(match.group(2))) for match in matches])
+                            #if match is not None:
+                            #    results["#phase_layers"] = int(match.group(1))
+                            #    results["#cnots_per_layer"] = int(match.group(2))
+                            #else:
+                            #    results["#phase_layers"] = None
+                            #    results["#cnots_per_layer"] = None
                             results_df["notes"] = args.notes 
                             results_df["matroid"] = method
                             results_df["root_heuristic"] = root_heuristic
                             results_df["split_heuristic"] = split_heuristic 
                             results_df["arch_density"] = architecture.density
                             results_df["architecture"] = architecture.name
+                            results_df.set_index(["idx", "mode", "file"], inplace=True, append=True)
                             all_results.append(results_df)
-        if args.metrics_csv and all_results != []:
-            final_df = concat(all_results)
-            if os.path.exists(args.metrics_csv):
-                with open(args.metrics_csv, 'a') as f:
-                    final_df.to_csv(f, header=False)
-            else:
-                final_df.to_csv(args.metrics_csv)
-            all_results = []
+                if args.metrics_csv and all_results != []:
+                    final_df = concat(all_results)
+                    if os.path.exists(args.metrics_csv):
+                        with open(args.metrics_csv, 'a') as f:
+                            final_df.to_csv(f, header=False)
+                    else:
+                        final_df.to_csv(args.metrics_csv)
+                    all_results = []
     if not args.metrics_csv and all_results != []:
         df = concat(all_results)
         df.reset_index(inplace=True)
         df["file"] = df["file"].str.replace("circuits/phasepoly/gadgets/20qubits/5gadgets/", "",regex=True)
         print(df)
+        print(df.time)
          
 
-def map_phase_poly_circuits(sources, architecture, modes, placement=True, **kwargs):
+def map_phase_poly_circuits(circuits, architecture, modes, placement=True, **kwargs):
     modes = make_into_list(modes)
-    circuits = [Circuit.from_qasm_file(f) for f in sources]
     all_results = []
     full_connected = create_architecture(FULLY_CONNNECTED, n_qubits=architecture.n_qubits)
     tket_initial_mapping = None if placement else [i for i in range(architecture.n_qubits)]
@@ -159,13 +195,17 @@ def map_phase_poly_circuits(sources, architecture, modes, placement=True, **kwar
             t = datetime.datetime.now()
             if mode == TKET_COMPILER or mode == TKET_THEN_STEINER_MODE:
                 a = architecture if mode == TKET_COMPILER else full_connected
-                c = route_tket(circuit.copy(), a, initial_mapping=tket_initial_mapping)
+                if isinstance(circuit, PhasePoly):
+                    circuit = circuit.to_tket()
+                else:
+                    circuit = PhasePoly.fromCircuit(circuit).to_tket()
+                c = route_tket(circuit, a, initial_mapping=tket_initial_mapping)
             elif mode == PHASEPOLY_TKET_MODE or mode == GAUSS_MODE:
-                c = route_phase_poly(circuit.copy(), architecture, GAUSS_MODE, **kwargs)
+                c = route_phase_poly(circuit, architecture, GAUSS_MODE, **kwargs)
             else:
-                c = route_phase_poly(circuit.copy(), architecture, mode, n_steps=5, population=5, **kwargs)
+                c = route_phase_poly(circuit, architecture, mode, n_steps=5, population=5, **kwargs)
             if mode == PHASEPOLY_TKET_MODE:
-                c = route_tket(c.copy(), architecture, initial_mapping=tket_initial_mapping)
+                c = route_tket(c, architecture, initial_mapping=tket_initial_mapping)
             elif mode == TKET_THEN_STEINER_MODE:
                 # TODO split the circuit c into CNOT sections and route that sequential steiner gauss
                 matrices, phases = zip(*tket_to_cnots(c))
@@ -177,26 +217,15 @@ def map_phase_poly_circuits(sources, architecture, modes, placement=True, **kwar
                     for phase in p:
                         c.add_gate(phase)
             t = datetime.datetime.now() - t
-            original_CNOTs = get_metrics(circuit).add_prefix("Original ")
+            #original_CNOTs = get_metrics(circuit).add_prefix("Original ")
             results = get_metrics(c)
             results["time"] = t
             results["idx"] = i
             results["mode"] = mode 
-            file = sources[i]
-            match = re.search('/(\d+)layers(\d+)cnots', file)
-            results["file"] = file
-            if match is not None:
-                results["#phase_layers"] = int(match.group(1))
-                results["#cnots_per_layer"] = int(match.group(2))
-            else:
-                results["#phase_layers"] = None
-                results["#cnots_per_layer"] = None
-            results = results.join(original_CNOTs)
-            results.set_index(["#phase_layers", "#cnots_per_layer"], inplace=True)
+            #results = results.join(original_CNOTs)
             all_results.append(results)
             #print("done", i)
     results_df = concat(all_results)
-    results_df.set_index(["idx", "mode", "file"], inplace=True, append=True)
     return results_df
 
 def get_metrics(circuit):
@@ -204,6 +233,7 @@ def get_metrics(circuit):
     n_gadgets = None
     if isinstance(circuit, Circuit):
         tk_circuit = pyzx_to_tk(circuit)
+        Transform.OptimisePostRouting().apply(tk_circuit)
         if hasattr(circuit, "n_gadgets"):
             n_gadgets = circuit.n_gadgets
     else:
@@ -211,8 +241,9 @@ def get_metrics(circuit):
     metrics["# Gadgets"] = n_gadgets
     metrics["CX depth"] = tk_circuit.depth_by_type(OpType.CX)
     metrics["# CX"] = tk_circuit.n_gates_of_type(OpType.CX)
-    metrics["Rz depth"] = tk_circuit.depth_by_type(OpType.Rz)
-    metrics["# Rz"] = tk_circuit.n_gates_of_type(OpType.Rz)
+    metrics["Rz depth"] = tk_circuit.depth_by_type(OpType.U1)
+    metrics["depth"] = tk_circuit.depth()
+    metrics["# Rz"] = tk_circuit.n_gates_of_type(OpType.U1)
     return DataFrame([metrics])
 
 def tket_to_cnots(circuit):

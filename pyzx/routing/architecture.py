@@ -60,8 +60,10 @@ class Architecture():
         self.name = name
         if coupling_graph is None:
             self.graph = Graph(backend=backend)
+            self._density = lambda edges, qubits: edges/(qubits*(qubits-1))
         else:
             self.graph = coupling_graph
+            self._density = lambda edges, qubits: 2*edges/(qubits*(qubits-1))
 
         if coupling_matrix is not None:
             # build the architecture graph
@@ -72,7 +74,7 @@ class Architecture():
             self.graph.add_edges(edges)
         else:
             self.vertices = [v for v in self.graph.vertices()]
-        self.pre_calc_distances()
+        self.distances = None
         if qubit_map is not None:
             self.qubit_map = qubit_map
         else:
@@ -83,7 +85,7 @@ class Architecture():
         self.reduce_order = reduce_order if reduce_order is not None else [i-1 for i in range(self.n_qubits, 0,-1)]
         self.arities = [(i, len([edge for edge in self.graph.edges() if edge[0] == v])) for i,v in enumerate(self.vertices)]
         self.arities.sort(key=lambda p: p[1], reverse=True)
-        self.density = 2*self.graph.nedges/(self.n_qubits*(self.n_qubits-1))
+        self.density = self._density(self.graph.nedges, self.n_qubits)
 
     def pre_calc_distances(self):
         self.distances = {"upper": [self.floyd_warshall(until, upper=True) for until, v in enumerate(self.vertices)],
@@ -294,6 +296,8 @@ class Architecture():
         # https://en.wikipedia.org/wiki/Prim%27s_algorithm
 
         # returns an iterator that walks the steiner tree, yielding (adj_node, leaf) pairs. If the walk is finished, it yields None
+        if self.distances is None:
+            self.pre_calc_distances()
         state = [start, [n for n in nodes]]
         root = start
         # TODO deal with qubit mapping
@@ -734,6 +738,71 @@ def create_dynamic_density_hamiltonian_architecture(n_qubits, density_prob=0.1, 
     name = dynamic_size_architecture_name(DENSITY+str(density_prob), n_qubits)
     return Architecture(name=name, coupling_graph=graph, backend=backend, **kwargs)
 
+def create_dynamic_density_tree_architecture(n_qubits, density_prob=0.1, backend=None, **kwargs):
+    import networkx as nx
+    #graph = Graph(backend=backend)
+    #vertices = graph.add_vertices(n_qubits)
+    graph = nx.Graph()
+    vertices = [i for i in range(n_qubits)]
+    graph.add_nodes_from(vertices)
+    edges = []
+    indices = [i for i in range(len(vertices))]
+    index = np.random.choice(indices)
+    root = vertices[index]
+    indices.remove(index)
+    stack = [root]
+    while stack != []:
+        parent = stack.pop(0)
+        if indices != []:
+            if len(indices) == 1:
+                n_children = 1
+            else:
+                p = [0]
+                x = 0.5
+                while len(p) < len(indices)-1:
+                    p.append(x)
+                    x = x/2
+                p.append(x*2)
+                n_children = np.random.choice(len(indices), p=p) # Ensure that the parent has at least 1 child
+            child_indices = np.random.choice(indices, n_children, replace=False)
+            children = [vertices[child] for child in child_indices]
+            edges += [(parent, child) for child in children]
+            [indices.remove(i) for i in child_indices]
+            stack += children
+    n_edges = int(density_prob*n_qubits*(n_qubits-1)/2) - len(edges) # Number of edges still to add.
+    if n_edges > 0:
+        possible_edges = [(v1, v2) for i, v1 in enumerate(vertices) for v2 in vertices[i+1:] if (v1,v2) not in edges and v1!=v2 and (v2,v1) not in edges]
+        indices = np.random.choice(len(possible_edges), n_edges, replace=False)
+        edges.extend([possible_edges[i] for i in indices])
+    #print(*sorted([(e1,e2) if e1 > e2 else (e2,e1) for e1,e2 in edges], key=lambda p: p[0]), sep="\n")
+    graph.add_edges_from(edges)
+
+    # Number the edges
+    numbered = {}
+    numbered = {v:i for i,v in enumerate(nx.dfs_postorder_nodes(graph, source=root))}
+    # Make the coupling graph and adjust the numbering
+    m = nx.to_numpy_array(graph)
+    perm = [numbered[i] for i in range(n_qubits)]
+    perm = [perm.index(i) for i in range(n_qubits)]
+    m = m[perm][:, perm]
+    spanning_tree = nx.dfs_tree(graph, source=root)
+    #print(*[[numbered[n] for n in edge] for edge in spanning_tree.edges()])
+    g = Graph(backend=backend)
+    vertices = g.add_vertices(n_qubits)
+    g.add_edges([(vertices[v1], vertices[v2]) for v1, v2 in [[numbered[n] for n in edge] for edge in spanning_tree.edges()]])
+    arch = Architecture(name="temp", coupling_graph=g, backend=backend, **kwargs)
+    subgraph = [i for i in range(n_qubits)]
+    reduce_order = []
+    while subgraph != []:
+        non_cutting = arch.non_cutting_vertices(subgraph)
+        node = max(non_cutting)
+        reduce_order.append(node)
+        subgraph.remove(node)
+    #arch.reduce_order = reduce_order
+    #reduce_order = []
+    name = dynamic_size_architecture_name(DENSITY+str(density_prob), n_qubits)
+    arch = Architecture(name, coupling_matrix=m, reduce_order=reduce_order, **kwargs)
+    return arch
 
 def create_dynamic_density_architecture(n_qubits, density_prob=0.1, backend=None, **kwargs):
     # raise NotImplementedError("This version is not fully implemented. please use create_dynamic_density_hamiltonian_architecture()")
@@ -770,7 +839,7 @@ def create_dynamic_density_architecture(n_qubits, density_prob=0.1, backend=None
     reduce_order = ordered_dfs(0)
     """
     spanning_tree = nx.dfs_tree(graph)
-    print(*[[numbered[n] for n in edge] for edge in spanning_tree.edges()])
+    #print(*[[numbered[n] for n in edge] for edge in spanning_tree.edges()])
     g = Graph(backend=backend)
     vertices = g.add_vertices(n_qubits)
     g.add_edges([(vertices[v1], vertices[v2]) for v1, v2 in [[numbered[n] for n in edge] for edge in spanning_tree.edges()]])
@@ -813,7 +882,7 @@ def create_architecture(name, **kwargs):
     arch_dict[IBMQ_POUGHKEEPSIE] = create_ibmq_poughkeepsie
     arch_dict[IBMQ_SINGAPORE] = create_ibmq_singapore
     arch_dict[IBMQ_BOEBLINGEN] = lambda **kwargs : create_ibmq_singapore(name=IBMQ_BOEBLINGEN, **kwargs)
-    arch_dict[DENSITY] = create_dynamic_density_architecture
+    arch_dict[DENSITY] = create_dynamic_density_tree_architecture
     if name == SQUARE:
         return create_square_architecture(**kwargs)
     elif name == LINE:

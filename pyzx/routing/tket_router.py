@@ -6,7 +6,10 @@ from pytket import OpType, UnitID
 from ..circuit import Circuit, ZPhase, CNOT
 
 def route_tket(circuit, architecture, initial_mapping=None):
-    tk_circuit = pyzx_to_tk(circuit)
+    if isinstance(circuit, Circuit):
+        tk_circuit = pyzx_to_tk(circuit)
+    else:
+        tk_circuit = circuit
     arch = get_tk_architecture(architecture)
     if initial_mapping is None:
         outcirc = route(tk_circuit, arch)
@@ -15,7 +18,9 @@ def route_tket(circuit, architecture, initial_mapping=None):
         for i, j in enumerate(initial_mapping):
             qmap[UnitID('q', i)] = UnitID('node', j) # TODO make flatnode into node once pytket is updated to 0.4
         outcirc = route(tk_circuit, arch, initial_map=qmap)
-    Transform.DecomposeSWAPtoCX().apply(outcirc)
+    #Transform.DecomposeSWAPtoCX().apply(outcirc)
+    #Transform.DecomposeBRIDGE().apply(outcirc)
+    Transform.OptimisePostRouting().apply(outcirc)
     #outcirc.decompose_SWAP_to_CX()
     return outcirc
 
