@@ -39,11 +39,14 @@ SYCAMORE_LIKE = "sycamore_like"
 IBMQ_POUGHKEEPSIE = "ibmq_poughkeepsie"
 IBMQ_SINGAPORE = "ibmq_singapore"
 IBMQ_BOEBLINGEN  = "ibmq_boeblingen"
+GOOGLE_SYCAMORE = "google_sycamore"
+IBM_ROCHESTER = "ibm_rochester"
 DENSITY = "dynamic_density"
 
 architectures = [SQUARE, CIRCLE, FULLY_CONNNECTED, LINE, DENSITY, IBM_QX4, IBM_QX2, IBM_QX3, 
                 IBM_QX5, IBM_Q20_TOKYO, RIGETTI_8Q_AGAVE, RIGETTI_16Q_ASPEN, RIGETTI_19Q_ACORN, 
-                REC_ARCH, SYCAMORE_LIKE, IBMQ_POUGHKEEPSIE, IBMQ_BOEBLINGEN, IBMQ_SINGAPORE]
+                REC_ARCH, SYCAMORE_LIKE, IBMQ_POUGHKEEPSIE, IBMQ_BOEBLINGEN, IBMQ_SINGAPORE, 
+                GOOGLE_SYCAMORE, IBM_ROCHESTER]
 dynamic_size_architectures = [FULLY_CONNNECTED, LINE, CIRCLE, SQUARE, DENSITY]
 
 debug = False
@@ -871,6 +874,57 @@ def create_dynamic_density_architecture(n_qubits, density_prob=0.1, backend=None
     #return Architecture(name, coupling_matrix=m, reduce_order=reduce_order, **kwargs)
     return arch
 
+def create_ibm_rochester(backend=None, **kwargs):
+    graph = Graph(backend=backend)
+    vertices = graph.add_vertices(53)
+    edges = connect_vertices_in_line([vertices[i] for i in range(53) if i not in [7, 14, 17,30,37, 40]])
+    extra_edges = [(7, 8), (7,20), (14,15), (14,44), (17,18), (17, 28), (0,22), (30,31), (30,42), (37, 38), (40,41), (40,51)]
+    edges += [(vertices[v1], vertices[v2]) for v1, v2 in extra_edges]
+    graph.add_edges(edges)
+    reduce_order = []
+    i = 52
+    for j in reversed([7, 14, 17,30,37, 40]):
+        reduce_order += list(range(i, j+1, -1))
+        reduce_order += [j, j+1]
+        i = j-1
+    reduce_order += list(range(i,0, -1))
+    print(reduce_order)
+    return Architecture(IBM_ROCHESTER, coupling_graph=graph, reduce_order=reduce_order, backend=backend, **kwargs)
+
+def create_google_sycamore(backend=None, **kwargs):
+    graph = Graph(backend=backend)
+    vertices = graph.add_vertices(53)
+    edges = connect_vertices_in_line([vertices[i] for i in range(53) if i not in [6,12,31,32,47,50]])
+    extra_edges = []
+    extra_edges += list(zip([0,1,4],[10,9,8]))
+    extra_edges += list(zip(range(10, 5, -1),range(14,19)))
+    extra_edges += list(zip(range(12,19),list(range(29,23, -1)) +[21]))
+    extra_edges += list(zip(list(range(29,24, -1)), list(range(34,39))))
+    extra_edges += list(zip(list(range(33,38)), [32] + list(range(43,39, -1))))
+    extra_edges += list(zip(list(range(42,38, -1)), [45,46,48,47]))
+    extra_edges += list(zip([45,46],[50,51]))
+    extra_edges += list(zip([1,6,21,33,47,50,12,32,31],[4,7,24,38, 48,51,13,43,33]))
+    edges += [(vertices[v1], vertices[v2]) for v1, v2 in extra_edges]
+    graph.add_edges(edges)
+    reduce_order = []
+    i = 52
+    for j in reversed([6,12,32, 47,50]):
+        if j == 32:
+            reduce_order += list(range(i, j+1, -1))
+            reduce_order += [j,31, j+1]
+            i = j-2
+        else:
+            reduce_order += list(range(i, j+1, -1))
+            reduce_order += [j, j+1]
+            i = j-1
+    reduce_order += list(range(i,0, -1))
+    #print(reduce_order)
+    #print(len(edges))
+    #print(*edges, sep='\n')
+    arch = Architecture(GOOGLE_SYCAMORE, coupling_graph=graph, reduce_order=reduce_order, backend=backend, **kwargs)
+    #arch.visualize()
+    return arch
+
 def create_architecture(name, **kwargs):
     # Source Rigetti architectures: https://www.rigetti.com/qpu # TODO create the architectures from names in pyquil.list_quantum_computers() <- needs mapping
     # Source IBM architectures: http://iic.jku.at/files/eda/2018_tcad_mapping_quantum_circuit_to_ibm_qx.pdf​
@@ -883,6 +937,8 @@ def create_architecture(name, **kwargs):
     arch_dict[IBMQ_SINGAPORE] = create_ibmq_singapore
     arch_dict[IBMQ_BOEBLINGEN] = lambda **kwargs : create_ibmq_singapore(name=IBMQ_BOEBLINGEN, **kwargs)
     arch_dict[DENSITY] = create_dynamic_density_tree_architecture
+    arch_dict[GOOGLE_SYCAMORE] = create_google_sycamore
+    arch_dict[IBM_ROCHESTER] = create_ibm_rochester
     if name == SQUARE:
         return create_square_architecture(**kwargs)
     elif name == LINE:

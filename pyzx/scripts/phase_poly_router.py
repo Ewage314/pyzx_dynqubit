@@ -133,7 +133,7 @@ def main(args):
                     if root_heuristic == "model":
                         models = [pickle.load(open(filename, "rb")) for filename in glob.glob(architecture.name +"_model_"+"*.pickle")]
                     for split_heuristic in split_heurs:
-                            if method == "arianne":
+                            if method == "arianne" and len(synthesis_method) > 1:
                                 m = ["steiner"]
                             else:
                                 m = mode
@@ -188,13 +188,13 @@ def main(args):
 def map_phase_poly_circuits(circuits, architecture, modes, placement=True, **kwargs):
     modes = make_into_list(modes)
     all_results = []
-    full_connected = create_architecture(FULLY_CONNNECTED, n_qubits=architecture.n_qubits)
     tket_initial_mapping = None if placement else [i for i in range(architecture.n_qubits)]
     for mode in modes:
         for i, circuit in enumerate(circuits):
+            print("Synthesising:", i, mode)
             t = datetime.datetime.now()
             if mode == TKET_COMPILER or mode == TKET_THEN_STEINER_MODE:
-                a = architecture if mode == TKET_COMPILER else full_connected
+                a = architecture if mode == TKET_COMPILER else create_architecture(FULLY_CONNNECTED, n_qubits=architecture.n_qubits)
                 if isinstance(circuit, PhasePoly):
                     circuit = circuit.to_tket()
                 else:
@@ -217,6 +217,7 @@ def map_phase_poly_circuits(circuits, architecture, modes, placement=True, **kwa
                     for phase in p:
                         c.add_gate(phase)
             t = datetime.datetime.now() - t
+            print("done", t)
             #original_CNOTs = get_metrics(circuit).add_prefix("Original ")
             results = get_metrics(c)
             results["time"] = t
@@ -224,7 +225,7 @@ def map_phase_poly_circuits(circuits, architecture, modes, placement=True, **kwa
             results["mode"] = mode 
             #results = results.join(original_CNOTs)
             all_results.append(results)
-            #print("done", i)
+            #print("done", i, datetime.datetime.now() - t)
     results_df = concat(all_results)
     return results_df
 
