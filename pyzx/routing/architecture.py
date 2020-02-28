@@ -887,7 +887,7 @@ def create_ibm_rochester(backend=None, **kwargs):
         reduce_order += list(range(i, j+1, -1))
         reduce_order += [j, j+1]
         i = j-1
-    reduce_order += list(range(i,0, -1))
+    reduce_order += list(range(i,-1, -1))
     print(reduce_order)
     return Architecture(IBM_ROCHESTER, coupling_graph=graph, reduce_order=reduce_order, backend=backend, **kwargs)
 
@@ -917,7 +917,7 @@ def create_google_sycamore(backend=None, **kwargs):
             reduce_order += list(range(i, j+1, -1))
             reduce_order += [j, j+1]
             i = j-1
-    reduce_order += list(range(i,0, -1))
+    reduce_order += list(range(i,-1, -1))
     #print(reduce_order)
     #print(len(edges))
     #print(*edges, sep='\n')
