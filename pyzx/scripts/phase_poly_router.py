@@ -2,6 +2,7 @@ import sys, os, re, glob, pickle
 import datetime
 import numpy as np
 from pandas import DataFrame, concat
+import subprocess, tempfile
 
 if __name__ == '__main__':
     print("Please call this as python -m pyzx phasepoly ...")
@@ -14,9 +15,11 @@ from ..utils import make_into_list, restricted_float
 from ..circuit import Circuit, ZPhase, CNOT
 from ..routing.tket_router import pyzx_to_tk, OpType, route_tket, tket_to_pyzx, Transform
 from ..parity_maps import CNOT_tracker
+from pytket import circuit_from_qasm
 
 TKET_THEN_STEINER_MODE = "tket->steiner"
 PHASEPOLY_TKET_MODE = "phase_poly->tket"
+STAQ_COMPILER = "staq"
 
 
 description = "Compiles given qasm files or those in the given folder to a given architecture."
@@ -24,7 +27,7 @@ description = "Compiles given qasm files or those in the given folder to a given
 import argparse
 parser = argparse.ArgumentParser(prog="pyzx phase poly", description=description)
 parser.add_argument("QASM_source", nargs='+', help="The QASM file or folder with QASM files to be routed.")
-parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=[TKET_COMPILER, STEINER_MODE, TKET_STEINER_MODE, TKET_THEN_STEINER_MODE, PHASEPOLY_TKET_MODE, GAUSS_MODE])
+parser.add_argument("-m", "--mode", nargs='+', dest="mode", default=STEINER_MODE, help="The mode specifying how to route. choose 'all' for using all modes.", choices=[TKET_COMPILER, STEINER_MODE, TKET_STEINER_MODE, TKET_THEN_STEINER_MODE, PHASEPOLY_TKET_MODE, GAUSS_MODE, STAQ_COMPILER])
 parser.add_argument("-a", "--architecture", nargs='+', dest="architecture", default=SQUARE, choices=architectures, help="Which architecture it should run compile to.")
 parser.add_argument("-q", "--qubits", nargs='+', default=None, type=int, help="The number of qubits for the fully connected architecture.")
 #parser.add_argument("--population", nargs='+', default=10, type=int, help="The population size for the genetic algorithm.")
@@ -137,7 +140,11 @@ def main(args):
                                 m = ["steiner"]
                             else:
                                 m = mode
-                            results_df = map_phase_poly_circuits(circuits, architecture, m, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
+                            if sources != []:
+                                files = sources
+                            else:
+                                files = ["GENERATED" for i in len(circuits)]
+                            results_df = map_phase_poly_circuits(circuits, architecture, m, files, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
                             if not args.raw:
                                 kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
                                 results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 
@@ -148,13 +155,9 @@ def main(args):
                                 #results_df["# cnots per layer"] = n_cnots_per_layer
                                 #results_df["architecture"] = architecture.name
                                 #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
-                            if sources != []:
-                                files = [sources[i] for i in results_df["idx"]]
-                            else:
-                                files = ["GENERATED" for i in results_df["idx"]]
                             matches = [re.search('/(\d+)layers(\d+)cnots', file) for file in files]
-                            results_df["file"] = files
-                            results_df["#phase_layers"], results_df["#cnots_per_layer"] = zip(*[(None, None) if match is None else (int(match.group(1)),int(match.group(2))) for match in matches])
+                            #results_df["file"] = files
+                            #results_df["#phase_layers"], results_df["#cnots_per_layer"] = zip(*[(None, None) if match is None else (int(match.group(1)),int(match.group(2))) for match in matches])
                             #if match is not None:
                             #    results["#phase_layers"] = int(match.group(1))
                             #    results["#cnots_per_layer"] = int(match.group(2))
@@ -185,12 +188,12 @@ def main(args):
         print(df.time)
          
 
-def map_phase_poly_circuits(circuits, architecture, modes, placement=True, **kwargs):
+def map_phase_poly_circuits(circuits, architecture, modes, files, placement=True, **kwargs):
     modes = make_into_list(modes)
     all_results = []
     tket_initial_mapping = None if placement else [i for i in range(architecture.n_qubits)]
     for mode in modes:
-        for i, circuit in enumerate(circuits):
+        for i, (circuit, file) in enumerate(zip(circuits, files)):
             print("Synthesising:", i, mode)
             t = datetime.datetime.now()
             if mode == TKET_COMPILER or mode == TKET_THEN_STEINER_MODE:
@@ -200,6 +203,36 @@ def map_phase_poly_circuits(circuits, architecture, modes, placement=True, **kwa
                 else:
                     circuit = PhasePoly.fromCircuit(circuit).to_tket()
                 c = route_tket(circuit, a, initial_mapping=tket_initial_mapping)
+            elif mode == STAQ_COMPILER:
+                if file != "GENERATED":
+                    device_map = {
+                        "rigetti_16q_aspen": "aspen-4",
+                        "9q-square":"square",
+                        "ibm_q20_tokyo":"tokyo",
+                        "9q-fully_connected":"fullcon",
+                        "rigetti_8q_agave":"agave",
+                        "ibmq_singapore":"singapore"
+                    }
+                    if architecture.name in device_map.keys():
+                        device = device_map[architecture.name]
+                        s = subprocess.check_output(" ".join(["./staq -S -O2 -l bestfit -m -d", device, file]), shell=True)
+                        s = s.decode("utf-8")
+                        s = s.replace("U", "u3")
+                        s = s.replace("CX", "cx")
+                        fp = tempfile.NamedTemporaryFile(suffix=".qasm")
+                        fp.write(s.encode('utf-8'))
+                        fp.seek(0) #Place the pointer back at the start of the file
+                        try:
+                            c = circuit_from_qasm(fp.name)
+                        except TypeError as e:
+                            print(s)
+                            raise e
+                        fp.close() #Remove the temporary file from memory
+                        Transform.OptimisePostRouting().apply(c)
+                    else:
+                        raise NotImplementedError("Architecture currently not implemented in staq", architecture.name)
+                else: 
+                    raise NotImplementedError("Can only parse existing qasm files with Staq atm.")
             elif mode == PHASEPOLY_TKET_MODE or mode == GAUSS_MODE:
                 c = route_phase_poly(circuit, architecture, GAUSS_MODE, **kwargs)
             else:
@@ -223,6 +256,7 @@ def map_phase_poly_circuits(circuits, architecture, modes, placement=True, **kwa
             results["time"] = t
             results["idx"] = i
             results["mode"] = mode 
+            results["file"] = file
             #results = results.join(original_CNOTs)
             all_results.append(results)
             #print("done", i, datetime.datetime.now() - t)
