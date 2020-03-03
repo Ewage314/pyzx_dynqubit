@@ -143,7 +143,8 @@ def main(args):
                             if sources != []:
                                 files = sources
                             else:
-                                files = ["GENERATED" for i in len(circuits)]
+                                print(circuits)
+                                files = ["GENERATED" for _ in circuits]
                             results_df = map_phase_poly_circuits(circuits, architecture, m, files, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
                             if not args.raw:
                                 kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
@@ -194,7 +195,7 @@ def map_phase_poly_circuits(circuits, architecture, modes, files, placement=True
     tket_initial_mapping = None if placement else [i for i in range(architecture.n_qubits)]
     for mode in modes:
         for i, (circuit, file) in enumerate(zip(circuits, files)):
-            print("Synthesising:", i, mode)
+            print("Synthesising:", i, mode, file)
             t = datetime.datetime.now()
             if mode == TKET_COMPILER or mode == TKET_THEN_STEINER_MODE:
                 a = architecture if mode == TKET_COMPILER else create_architecture(FULLY_CONNNECTED, n_qubits=architecture.n_qubits)
@@ -215,7 +216,7 @@ def map_phase_poly_circuits(circuits, architecture, modes, files, placement=True
                     }
                     if architecture.name in device_map.keys():
                         device = device_map[architecture.name]
-                        s = subprocess.check_output(" ".join(["./staq -S -O2 -l bestfit -m -d", device, file]), shell=True)
+                        s = subprocess.check_output(" ".join(["./staq -M swap -m -d", device, file]), shell=True)
                         s = s.decode("utf-8")
                         s = s.replace("U", "u3")
                         s = s.replace("CX", "cx")
