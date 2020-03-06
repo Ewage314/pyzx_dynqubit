@@ -3,6 +3,9 @@ import datetime
 import numpy as np
 from pandas import DataFrame, concat
 import subprocess, tempfile
+profile = False
+if profile:
+    import cProfile, pstats, io
 
 if __name__ == '__main__':
     print("Please call this as python -m pyzx phasepoly ...")
@@ -196,6 +199,9 @@ def map_phase_poly_circuits(circuits, architecture, modes, files, placement=True
     for mode in modes:
         for i, (circuit, file) in enumerate(zip(circuits, files)):
             print("Synthesising:", i, mode, file)
+            if profile:
+                pr = cProfile.Profile()
+                pr.enable()
             t = datetime.datetime.now()
             if mode == TKET_COMPILER or mode == TKET_THEN_STEINER_MODE:
                 a = architecture if mode == TKET_COMPILER else create_architecture(FULLY_CONNNECTED, n_qubits=architecture.n_qubits)
@@ -216,7 +222,7 @@ def map_phase_poly_circuits(circuits, architecture, modes, files, placement=True
                     }
                     if architecture.name in device_map.keys():
                         device = device_map[architecture.name]
-                        s = subprocess.check_output(" ".join(["./staq -M swap -m -d", device, file]), shell=True)
+                        s = subprocess.check_output(" ".join(["./staq -M steiner --disable-layout-optimization -m -d", device, file]), shell=True)
                         s = s.decode("utf-8")
                         s = s.replace("U", "u3")
                         s = s.replace("CX", "cx")
@@ -251,6 +257,14 @@ def map_phase_poly_circuits(circuits, architecture, modes, files, placement=True
                     for phase in p:
                         c.add_gate(phase)
             t = datetime.datetime.now() - t
+            if profile:
+                pr.disable()
+                s = io.StringIO()
+                sortby = 'tottime'
+                ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+                ps.print_stats()
+                print(s.getvalue())
+                input("Check" + str(c.n_gadgets))
             print("done", t)
             #original_CNOTs = get_metrics(circuit).add_prefix("Original ")
             results = get_metrics(c)
