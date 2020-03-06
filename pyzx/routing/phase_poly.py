@@ -685,21 +685,15 @@ class PhasePoly():
         # Make a matrix from the parities
         matrix = Mat2([[int(parity[i]) for parity in parities_to_reach] for i in range(architecture.n_qubits)] )
         circuit = CNOT_tracker(architecture.n_qubits)
-        self.cols_to_reach = self._check_columns(matrix, circuit, [i for i in range(len(parities_to_reach))], parities_to_reach)
+        cols_to_reach = self._check_columns(matrix, circuit, [i for i in range(len(parities_to_reach))], parities_to_reach)
         self.prev_rows = None
         def place_cnot(control, target):
             # Place the CNOT on the circuit
             circuit.add_gate(CNOT(control, target))
             # Adjust the matrix accordingly - reversed elementary row operations
-            matrix.row_add(target, control)
-            #print(matrix)
-            #print(self.cols_to_reach)
-            #print()
-            # Keep track of the parities in the circuit - normal elementary row operations
-            self.cols_to_reach = self._check_columns(matrix, circuit, self.cols_to_reach, parities_to_reach)   
+            matrix.row_add(target, control) 
         def recurse(cols_to_use, qubits_to_use):
             # update cols_to_use with cols_to_reach
-            cols_to_use = [c for c in cols_to_use if c in self.cols_to_reach]
             if qubits_to_use != [] and cols_to_use != []:
                 # Select edge qubits
                 qubits = architecture.non_cutting_vertices(qubits_to_use) 
@@ -733,12 +727,12 @@ class PhasePoly():
                 #print(qubits_to_use, chosen_row, chosen_neighbor)
                 if sum([matrix.data[chosen_neighbor][c] for c in cols1]) != 0: # Check if adding the cnot is useful
                     place_cnot(chosen_row, chosen_neighbor)
-                    #cols1 = [c for c in cols1 if c in self.cols_to_reach]
-                    #if sum([matrix.data[chosen_row][c] for c in cols1]) != 0: # Check if adding the cnot is useful
-                    #    place_cnot(chosen_neighbor, chosen_row)
+                    # Might have changed the matrix. Only columns to consider are in cols1 (cols0 has been achieved by recursion)
+                    cols1 = self._check_columns(matrix, circuit, cols1, parities_to_reach)  
                 elif cols1 != []:
                     place_cnot(chosen_neighbor, chosen_row)
                     place_cnot(chosen_row, chosen_neighbor)
+                    # Since the neighbor was all zeros, this is effectively a swap and no columns need to be checked.
                 # Split the column into 1s and 0s in that row
                 cols0 = [col for col in cols1 if matrix.data[chosen_row][col] == 0]
                 cols1 = [col for col in cols1 if matrix.data[chosen_row][col] == 1]
@@ -751,10 +745,9 @@ class PhasePoly():
                 recurse(cols1, qubits_to_use)
         if depth_aware:
             self.prev_rows = []        
-            recurse(self.cols_to_reach, [i for i in range(n_qubits)])
+            recurse(cols_to_reach, [i for i in range(n_qubits)])
         else:
-            recurse(self.cols_to_reach, [i for i in range(n_qubits)])
-        del self.cols_to_reach
+            recurse(cols_to_reach, [i for i in range(n_qubits)])
         del self.prev_rows
         if full:
             # Calculate the final parity that needs to be added from the circuit and self.out_par
@@ -766,9 +759,10 @@ class PhasePoly():
     def _check_columns(self, matrix, circuit, columns, parities_to_reach):
         # Check for finished columns
         for col in [c for c in columns]:
-            if sum([row[col] for row in matrix.data]) == 1:
+            column_data = [row[col] for row in matrix.data]
+            if sum(column_data) == 1:
                 # Add phase gates where needed
-                qubit = [row[col] for row in matrix.data].index(1)
+                qubit = column_data.index(1)
                 circuit.add_gate(ZPhase(qubit, self.zphases[parities_to_reach[col]]))
                 # Remove columns from the matrix if the corresponding parity was obtained
                 columns.remove(col)
