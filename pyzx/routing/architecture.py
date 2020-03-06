@@ -63,10 +63,10 @@ class Architecture():
         self.name = name
         if coupling_graph is None:
             self.graph = Graph(backend=backend)
-            self._density = lambda edges, qubits: edges/(qubits*(qubits-1))
+            self._double_edged = True
         else:
             self.graph = coupling_graph
-            self._density = lambda edges, qubits: 2*edges/(qubits*(qubits-1))
+            self._double_edged = False
 
         if coupling_matrix is not None:
             # build the architecture graph
@@ -94,10 +94,11 @@ class Architecture():
         self.distances = {"upper": [self.floyd_warshall(until, upper=True) for until, v in enumerate(self.vertices)],
                           "full": [self.floyd_warshall(until, upper=False) for until, v in enumerate(self.vertices)]}
 
-    def _density(self):
-        import networkx as nx
-        g = nx.from_edgelist(self.graph.edges())
-        return nx.density(g)
+    def _density(self, edges, qubits):
+        density = edges/(qubits*(qubits-1))
+        if self._double_edged:
+            return density
+        return 2*density
 
     def pre_calc_non_cutting_vertices(self):
         # TODO implement this and uncomment line in constructor.
