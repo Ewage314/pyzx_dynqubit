@@ -74,122 +74,132 @@ def main(args):
         if delete_csv:
             os.remove(args.metrics_csv)
 
-    sources = make_into_list(args.QASM_source)
-    if args.subfolder is not None:
-        print(args.subfolder)
-        if args.subfolder == ["."]:
-            sources = [os.path.join(d, o) for d in sources for o in os.listdir(d) 
-                    if os.path.isdir(os.path.join(d,o))]
-        else:
-            sources = [os.path.join(source, subfolder) for source in sources for subfolder in args.subfolder if os.path.isdir(source)]
-        # Remove non existing paths
 
-    sources = [source for source in sources if os.path.exists(source) or print("Warning, skipping non-existing source:", source)]
-    sources = [os.path.join(source, f) for source in sources for f in os.listdir(source)]
-    sources = [source for source in sources if os.path.isfile(source)]
-    circuits = [Circuit.from_qasm_file(f) for f in sources]
-    
-    if circuits == []:
-        n_circuits = int(input("No files found, how many circuits should be generated?"))
-        n_gadgets = [int(s) for s in input("How many cnots,phases should these circuits have? (space separate for multiple)").split(" ") if s != ""]
-        #n_gadgets = [[int(i) for i in s.split(",")] for s in input("How many cnots,phases should these circuits have? (space separate for multiple)").split(" ") if s != ""]
-        gen_circuits = {}
-    else:
-        gen_circuits = None
-
-    if "all" in args.mode:
-        mode = elim_modes + [TKET_COMPILER]
-    else:
-        mode = args.mode
-
-    #all_circuits = [] 
-    #for source in sources:
-    #    print("Mapping qasm files in path:", source)
-    all_results = []
-    for a in args.architecture:
-        if a in dynamic_size_architectures:
-            if a == "dynamic_density":
-                archs = [create_architecture(a, n_qubits=q, density_prob=d) for q in args.qubits for d in args.density]
+    original_sources = make_into_list(args.QASM_source)
+    qubits = make_into_list(args.qubits)
+    if qubits == []:
+        qubits = [None]
+    for qubit in qubits:
+        if len(qubits) > 1:
+            sources = [s+"{0}qubits".format(qubit) for s in original_sources] 
+        else: 
+            sources = original_sources
+        if args.subfolder is not None:
+            print(sources)
+            print(args.subfolder)
+            if args.subfolder == ["."]:
+                sources = [os.path.join(d, o) for d in sources for o in os.listdir(d) 
+                        if os.path.isdir(os.path.join(d,o))]
             else:
-                archs = [create_architecture(a, n_qubits=q) for q in args.qubits]
+                sources = [os.path.join(source, subfolder) for source in sources for subfolder in args.subfolder if os.path.isdir(source)]
+            # Remove non existing paths
+
+        sources = [source for source in sources if os.path.exists(source) or input("Warning, skipping non-existing source:" + source + " \nPress enter to continue")]
+        sources = [os.path.join(source, f) for source in sources for f in os.listdir(source)]
+        sources = [source for source in sources if os.path.isfile(source)]
+        circuits = [Circuit.from_qasm_file(f) for f in sources]
+        
+        if circuits == []:
+            n_circuits = int(input("No files found, how many circuits should be generated?"))
+            n_gadgets = [int(s) for s in input("How many cnots,phases should these circuits have? (space separate for multiple)").split(" ") if s != ""]
+            #n_gadgets = [[int(i) for i in s.split(",")] for s in input("How many cnots,phases should these circuits have? (space separate for multiple)").split(" ") if s != ""]
+            gen_circuits = {}
         else:
-            archs = [create_architecture(a)]
-        for architecture in archs:
-            if gen_circuits is not None:
-                if architecture.n_qubits not in gen_circuits:
-                    print("generating circuits for q=", architecture.n_qubits)
-                    phase_polies = [make_random_phase_poly_from_gadgets(architecture.n_qubits, g, False) for g in n_gadgets for _ in range(n_circuits)]
-                    #gen_circuits[architecture.n_qubits] = [phase_poly.rec_gray_synth(GAUSS_MODE, architecture, root_heuristic="nash")[0] for phase_poly in phase_polies]
-                    gen_circuits[architecture.n_qubits] = phase_polies
-                    #gen_circuits[architecture.n_qubits] = [make_random_phase_poly_approximate(architecture.n_qubits, cnots, phases, True) for cnots, phases in n_gadgets for _ in range(n_circuits)]
-                circuits = gen_circuits[architecture.n_qubits]
-            print("Synthesising circuits for architecture ", architecture.name)
-            root_heurs = make_into_list(args.root_heuristic)
-            split_heurs = make_into_list(args.split_heuristic)
-            synthesis_method = make_into_list(args.matroid)
-            for method in synthesis_method:
-                if method in ["matroid", "arianne"]:
-                    root_heurs2 = [""]
-                    split_heurs2 = [""]
+            gen_circuits = None
+
+        if "all" in args.mode:
+            mode = elim_modes + [TKET_COMPILER]
+        else:
+            mode = args.mode
+
+        #all_circuits = [] 
+        #for source in sources:
+        #    print("Mapping qasm files in path:", source)
+        all_results = []
+        for a in args.architecture:
+            if a in dynamic_size_architectures:
+                if a == "dynamic_density":
+                    archs = [create_architecture(a, n_qubits=q, density_prob=d) for q in [qubit] for d in args.density]
                 else:
-                    root_heurs2 = root_heurs
-                    split_heurs2 = split_heurs
-                for root_heuristic in root_heurs2:
-                    models = None
-                    if root_heuristic == "model":
-                        models = [pickle.load(open(filename, "rb")) for filename in glob.glob(architecture.name +"_model_"+"*.pickle")]
-                    for split_heuristic in split_heurs:
-                            if method == "arianne" and len(synthesis_method) > 1:
-                                m = ["steiner"]
-                            else:
-                                m = mode
-                            if sources != []:
-                                files = sources
-                            else:
-                                print(circuits)
-                                files = ["GENERATED" for _ in circuits]
-                            results_df = map_phase_poly_circuits(circuits, architecture, m, files, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
-                            if not args.raw:
-                                kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
-                                results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 
-                                                    results_df.median(**kwargs).add_suffix("_median"), 
-                                                    results_df.min(**kwargs).add_suffix("_min"), 
-                                                    results_df.max(**kwargs).add_suffix("_max")], axis=1)
-                                #results_df["# phase layers"] = n_phase_layers
-                                #results_df["# cnots per layer"] = n_cnots_per_layer
-                                #results_df["architecture"] = architecture.name
-                                #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
-                            matches = [re.search('/(\d+)layers(\d+)cnots', file) for file in files]
-                            #results_df["file"] = files
-                            #results_df["#phase_layers"], results_df["#cnots_per_layer"] = zip(*[(None, None) if match is None else (int(match.group(1)),int(match.group(2))) for match in matches])
-                            #if match is not None:
-                            #    results["#phase_layers"] = int(match.group(1))
-                            #    results["#cnots_per_layer"] = int(match.group(2))
-                            #else:
-                            #    results["#phase_layers"] = None
-                            #    results["#cnots_per_layer"] = None
-                            results_df["notes"] = args.notes 
-                            results_df["matroid"] = method
-                            results_df["root_heuristic"] = root_heuristic
-                            results_df["split_heuristic"] = split_heuristic 
-                            results_df["arch_density"] = architecture.density
-                            results_df["architecture"] = architecture.name
-                            results_df.set_index(["idx", "mode", "file"], inplace=True, append=True)
-                            all_results.append(results_df)
-                if args.metrics_csv and all_results != []:
-                    final_df = concat(all_results)
-                    if os.path.exists(args.metrics_csv):
-                        with open(args.metrics_csv, 'a') as f:
-                            final_df.to_csv(f, header=False)
+                    archs = [create_architecture(a, n_qubits=q) for q in [qubit]]
+            else:
+                archs = [create_architecture(a)]
+            for architecture in archs:
+                if gen_circuits is not None:
+                    if architecture.n_qubits not in gen_circuits:
+                        print("generating circuits for q=", architecture.n_qubits)
+                        phase_polies = [make_random_phase_poly_from_gadgets(architecture.n_qubits, g, False) for g in n_gadgets for _ in range(n_circuits)]
+                        #gen_circuits[architecture.n_qubits] = [phase_poly.rec_gray_synth(GAUSS_MODE, architecture, root_heuristic="nash")[0] for phase_poly in phase_polies]
+                        gen_circuits[architecture.n_qubits] = phase_polies
+                        #gen_circuits[architecture.n_qubits] = [make_random_phase_poly_approximate(architecture.n_qubits, cnots, phases, True) for cnots, phases in n_gadgets for _ in range(n_circuits)]
+                    circuits = gen_circuits[architecture.n_qubits]
+                print("Synthesising circuits for architecture ", architecture.name)
+                root_heurs = make_into_list(args.root_heuristic)
+                split_heurs = make_into_list(args.split_heuristic)
+                synthesis_method = make_into_list(args.matroid)
+                for method in synthesis_method:
+                    if method in ["matroid", "arianne"]:
+                        root_heurs2 = [""]
+                        split_heurs2 = [""]
                     else:
-                        final_df.to_csv(args.metrics_csv)
-                    all_results = []
-    if not args.metrics_csv and all_results != []:
-        df = concat(all_results)
-        df.reset_index(inplace=True)
-        df["file"] = df["file"].str.replace("circuits/phasepoly/gadgets/20qubits/5gadgets/", "",regex=True)
-        print(df)
-        print(df.time)
+                        root_heurs2 = root_heurs
+                        split_heurs2 = split_heurs
+                    for root_heuristic in root_heurs2:
+                        models = None
+                        if root_heuristic == "model":
+                            models = [pickle.load(open(filename, "rb")) for filename in glob.glob(architecture.name +"_model_"+"*.pickle")]
+                        for split_heuristic in split_heurs:
+                                if method == "arianne" and len(synthesis_method) > 1:
+                                    m = ["steiner"]
+                                else:
+                                    m = mode
+                                if sources != []:
+                                    files = sources
+                                else:
+                                    print(circuits)
+                                    files = ["GENERATED" for _ in circuits]
+                                results_df = map_phase_poly_circuits(circuits, architecture, m, files, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
+                                if not args.raw:
+                                    kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
+                                    results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 
+                                                        results_df.median(**kwargs).add_suffix("_median"), 
+                                                        results_df.min(**kwargs).add_suffix("_min"), 
+                                                        results_df.max(**kwargs).add_suffix("_max")], axis=1)
+                                    #results_df["# phase layers"] = n_phase_layers
+                                    #results_df["# cnots per layer"] = n_cnots_per_layer
+                                    #results_df["architecture"] = architecture.name
+                                    #results_df.set_index(["# phase layers","# cnots per layer", "architecture"], inplace=True, append=True)
+                                matches = [re.search('/(\d+)layers(\d+)cnots', file) for file in files]
+                                #results_df["file"] = files
+                                #results_df["#phase_layers"], results_df["#cnots_per_layer"] = zip(*[(None, None) if match is None else (int(match.group(1)),int(match.group(2))) for match in matches])
+                                #if match is not None:
+                                #    results["#phase_layers"] = int(match.group(1))
+                                #    results["#cnots_per_layer"] = int(match.group(2))
+                                #else:
+                                #    results["#phase_layers"] = None
+                                #    results["#cnots_per_layer"] = None
+                                results_df["notes"] = args.notes 
+                                results_df["matroid"] = method
+                                results_df["root_heuristic"] = root_heuristic
+                                results_df["split_heuristic"] = split_heuristic 
+                                results_df["arch_density"] = architecture.density
+                                results_df["architecture"] = architecture.name
+                                results_df.set_index(["idx", "mode", "file"], inplace=True, append=True)
+                                all_results.append(results_df)
+                    if args.metrics_csv and all_results != []:
+                        final_df = concat(all_results)
+                        if os.path.exists(args.metrics_csv):
+                            with open(args.metrics_csv, 'a') as f:
+                                final_df.to_csv(f, header=False)
+                        else:
+                            final_df.to_csv(args.metrics_csv)
+                        all_results = []
+        if not args.metrics_csv and all_results != []:
+            df = concat(all_results)
+            df.reset_index(inplace=True)
+            df["file"] = df["file"].str.replace("circuits/phasepoly/gadgets/20qubits/5gadgets/", "",regex=True)
+            print(df)
+            print(df.time)
          
 
 def map_phase_poly_circuits(circuits, architecture, modes, files, placement=True, **kwargs):
