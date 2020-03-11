@@ -692,63 +692,40 @@ class PhasePoly():
             circuit.add_gate(CNOT(control, target))
             # Adjust the matrix accordingly - reversed elementary row operations
             matrix.row_add(target, control) 
-        def recurse(cols_to_use, qubits_to_use):
-            # update cols_to_use with cols_to_reach
+        def base_recurse(cols_to_use, qubits_to_use):
             if qubits_to_use != [] and cols_to_use != []:
                 # Select edge qubits
                 qubits = architecture.non_cutting_vertices(qubits_to_use) 
-                if self.prev_rows is not None:
-                    remove_prev = [q for q in qubits if q in self.prev_rows]
-                    if remove_prev != []:
-                        qubits = remove_prev
                 # Pick the qubit where the recursion split will be most skewed.
                 chosen_row = max(qubits, key=lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1, 0]], default=-1))
                 # Split the column into 1s and 0s in that row
                 cols1 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 1]
                 cols0 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 0]
-                recurse(cols0, [q for q in qubits_to_use if q != chosen_row])
-                
-                neighbors = [q for q in architecture.get_neighboring_qubits(chosen_row) if q in qubits_to_use ]
-                #"""
-                overwrite = False if self.prev_rows is None else chosen_row in self.prev_rows
-                if self.prev_rows is not None and not overwrite:
-                    filtered_neighbors = [n for n in neighbors if n not in self.prev_rows]
-                    if filtered_neighbors == []:
-                        overwrite = True
-                    else:
-                        neighbors = filtered_neighbors
-                #"""
+                base_recurse(cols0, [q for q in qubits_to_use if q != chosen_row])
+                one_recurse(cols1, qubits_to_use, chosen_row)
+        def one_recurse(cols_to_use, qubits_to_use, qubit):
+            if cols_to_use != []:
+                neighbors = [q for q in architecture.get_neighboring_qubits(qubit) if q in qubits_to_use ]
                 if neighbors == []:
-                    print(qubits_to_use, chosen_row)
+                    print(qubits_to_use, qubit)
                     print(matrix)
                     exit(42)
-                chosen_neighbor = max(neighbors, key=lambda q: len([col for col in cols1 if matrix.data[q][col] == 1]))
+                chosen_neighbor = max(neighbors, key=lambda q: len([col for col in cols_to_use if matrix.data[q][col] == 1]))
                 # Place CNOTs if you still need to extract columns
-                #print(qubits_to_use, chosen_row, chosen_neighbor)
-                if sum([matrix.data[chosen_neighbor][c] for c in cols1]) != 0: # Check if adding the cnot is useful
-                    place_cnot(chosen_row, chosen_neighbor)
-                    # Might have changed the matrix. Only columns to consider are in cols1 (cols0 has been achieved by recursion)
-                    cols1 = self._check_columns(matrix, circuit, cols1, parities_to_reach)  
-                elif cols1 != []:
-                    place_cnot(chosen_neighbor, chosen_row)
-                    place_cnot(chosen_row, chosen_neighbor)
+                if sum([matrix.data[chosen_neighbor][c] for c in cols_to_use]) != 0: # Check if adding the cnot is useful
+                    place_cnot(qubit, chosen_neighbor)
+                    # Might have changed the matrix.
+                    cols_to_use = self._check_columns(matrix, circuit, cols_to_use, parities_to_reach)  
+                else: # Will never change the matrix
+                    place_cnot(chosen_neighbor, qubit)
+                    place_cnot(qubit, chosen_neighbor)
                     # Since the neighbor was all zeros, this is effectively a swap and no columns need to be checked.
                 # Split the column into 1s and 0s in that row
-                cols0 = [col for col in cols1 if matrix.data[chosen_row][col] == 0]
-                cols1 = [col for col in cols1 if matrix.data[chosen_row][col] == 1]
-                if self.prev_rows is not None:
-                    if overwrite:
-                        self.prev_rows = []
-                    self.prev_rows.append(chosen_row)
-                    self.prev_rows.append(chosen_neighbor)
-                recurse(cols0, [q for q in qubits_to_use if q != chosen_row])
-                recurse(cols1, qubits_to_use)
-        if depth_aware:
-            self.prev_rows = []        
-            recurse(cols_to_reach, [i for i in range(n_qubits)])
-        else:
-            recurse(cols_to_reach, [i for i in range(n_qubits)])
-        del self.prev_rows
+                cols0 = [col for col in cols_to_use if matrix.data[qubit][col] == 0]
+                cols1 = [col for col in cols_to_use if matrix.data[qubit][col] == 1]
+                base_recurse(cols0, [q for q in qubits_to_use if q != qubit])
+                one_recurse(cols1, qubits_to_use, qubit)
+        base_recurse(cols_to_reach, [i for i in range(n_qubits)])
         if full:
             # Calculate the final parity that needs to be added from the circuit and self.out_par
            self._obtain_final_parities(circuit, architecture, mode, **kwargs)
