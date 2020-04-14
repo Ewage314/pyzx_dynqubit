@@ -26,8 +26,8 @@ from ..linalg import Mat2
 from ..routing.cnot_mapper import sequential_gauss, GAUSS_MODE, STEINER_MODE, TKET_COMPILER, gauss
 from ..routing.tket_router import get_tk_architecture, pyzx_to_tk, Placement, OpType
 from ..routing.steiner import steiner_reduce_column
-from ..routing.architecture import create_architecture, FULLY_CONNNECTED
-from ..utils import make_into_list
+from ..routing.architecture import create_architecture, FULLY_CONNNECTED, Architecture
+from ..utils import make_into_list, maxelements
 
 from pytket.circuit import PauliExpBox, Pauli
 from pytket.circuit import Circuit as TketCircuit
@@ -671,14 +671,11 @@ class PhasePoly():
         circuit.n_gadgets = len(self.zphases.keys())
         return circuit, [i for i in range(architecture.n_qubits)], [i for i in range(architecture.n_qubits)]
 
-    def Ariannes_synth(self, mode, architecture, full=True, depth_aware=False, **kwargs):
+    def Ariannes_synth(self, mode, architecture, full=True, zeroes_rec=False, neighbour_path=False, tie_break=False, **kwargs):
         kwargs["full_reduce"] = True
         #print("------------ START! -----------------------")
-        if architecture is None or GAUSS_MODE in mode:
+        if not isinstance(architecture, Architecture):
             architecture = create_architecture(FULLY_CONNNECTED, n_qubits=len(self.out_par[0]))
-            mode = GAUSS_MODE
-        else:
-            mode = GAUSS_MODE if GAUSS_MODE in mode else STEINER_MODE
         n_qubits = architecture.n_qubits
         # Obtain the parities
         parities_to_reach = self.all_parities
@@ -686,7 +683,7 @@ class PhasePoly():
         matrix = Mat2([[int(parity[i]) for parity in parities_to_reach] for i in range(architecture.n_qubits)] )
         circuit = CNOT_tracker(architecture.n_qubits)
         cols_to_reach = self._check_columns(matrix, circuit, [i for i in range(len(parities_to_reach))], parities_to_reach)
-        self.prev_rows = None
+        self.prev_rows = []
         def place_cnot(control, target):
             # Place the CNOT on the circuit
             circuit.add_gate(CNOT(control, target))
@@ -697,20 +694,40 @@ class PhasePoly():
                 # Select edge qubits
                 qubits = architecture.non_cutting_vertices(qubits_to_use) 
                 # Pick the qubit where the recursion split will be most skewed.
-                chosen_row = max(qubits, key=lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1, 0]], default=-1))
+
+                if zeroes_rec:
+                    selection_criterium = lambda q: len([col for col in cols_to_use if matrix.data[q][col] == 0])
+                else:
+                    selection_criterium = lambda q: max([len([col for col in cols_to_use if matrix.data[q][col] == i]) for i in [1, 0]], default=-1)
+                if tie_break:
+                    chosen_row = self._tie_break(qubits, maxelements(qubits, key=selection_criterium))
+                else:
+                    chosen_row = max(qubits, key=selection_criterium)
                 # Split the column into 1s and 0s in that row
                 cols1 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 1]
                 cols0 = [col for col in cols_to_use if matrix.data[chosen_row][col] == 0]
                 base_recurse(cols0, [q for q in qubits_to_use if q != chosen_row])
-                one_recurse(cols1, qubits_to_use, chosen_row)
+                one_recurse(cols1, [q for q in qubits_to_use if q != chosen_row], chosen_row)
         def one_recurse(cols_to_use, qubits_to_use, qubit):
             if cols_to_use != []:
+                self._update_prev_rows([qubit])
                 neighbors = [q for q in architecture.get_neighboring_qubits(qubit) if q in qubits_to_use ]
                 if neighbors == []:
-                    print(qubits_to_use, qubit)
-                    print(matrix)
-                    exit(42)
-                chosen_neighbor = max(neighbors, key=lambda q: len([col for col in cols_to_use if matrix.data[q][col] == 1]))
+                    print("No neighbors found:", qubits_to_use, qubit)
+                selection_criterium = lambda q: len([col for col in cols_to_use if matrix.data[q][col] == 1])
+                indices = maxelements(neighbors, key=selection_criterium)
+                if neighbour_path and len(indices) > 1 and selection_criterium(neighbors[indices[0]]) == 0:
+                    # We will swap, pick the right direction to swap towards
+                    # This is the neighbour with the shortest path (restricted to qubits_to_use) to a row with most ones.
+                    directions = [qubits_to_use[i] for i in maxelements(qubits_to_use, key=selection_criterium)] # All rows with most ones
+                    path_criterium = lambda i: min(directions, key=lambda q: len(architecture.shortest_path(neighbors[i],q,qubits_to_use)))
+                    indices = maxelements(indices, key=path_criterium, reverse=True)
+                    print("Neighbour path:", neighbors, directions, [neighbors[i] for i in indices])
+                if tie_break and len(indices) > 1:
+                    chosen_neighbor = self._tie_break(neighbors, indices)
+                else:
+                    chosen_neighbor = neighbors[indices[0]]
+
                 # Place CNOTs if you still need to extract columns
                 if sum([matrix.data[chosen_neighbor][c] for c in cols_to_use]) != 0: # Check if adding the cnot is useful
                     place_cnot(qubit, chosen_neighbor)
@@ -720,10 +737,11 @@ class PhasePoly():
                     place_cnot(chosen_neighbor, qubit)
                     place_cnot(qubit, chosen_neighbor)
                     # Since the neighbor was all zeros, this is effectively a swap and no columns need to be checked.
+                self._update_prev_rows([chosen_neighbor])
                 # Split the column into 1s and 0s in that row
                 cols0 = [col for col in cols_to_use if matrix.data[qubit][col] == 0]
                 cols1 = [col for col in cols_to_use if matrix.data[qubit][col] == 1]
-                base_recurse(cols0, [q for q in qubits_to_use if q != qubit])
+                base_recurse(cols0, qubits_to_use)
                 one_recurse(cols1, qubits_to_use, qubit)
         base_recurse(cols_to_reach, [i for i in range(n_qubits)])
         if full:
@@ -744,6 +762,30 @@ class PhasePoly():
                 # Remove columns from the matrix if the corresponding parity was obtained
                 columns.remove(col)
         return columns 
+
+    def _tie_break(self, qubits, indices):
+        print("Tie break:", self.prev_rows, [qubits[i] for i in indices], end="\t")
+        for i in indices:
+            if qubits[i] not in self.prev_rows:
+                return qubits[i] if not print(qubits[i]) else qubits[i]
+        return qubits[indices[0]] if not print(qubits[indices[0]]) else qubits[indices[0]]
+
+    def _update_prev_rows(self, qubits):
+        #print("Updating prev rows:", self.prev_rows, qubits[0], end="\t")
+        #if any(qubit in self.prev_rows for qubit in qubits):
+        #    self.prev_rows = qubits
+        #else:
+        #    self.prev_rows += qubits
+        index = max([q for q in qubits if q in self.prev_rows], key=lambda q: self.prev_rows.index(q), default=-1)
+        if index == -1:
+            self.prev_rows += qubits
+        else:
+            index += 2 - index % 2
+            if index != len(self.prev_rows):
+                self.prev_rows = self.prev_rows[index:] + qubits
+            else:
+                self.prev_rows = [qubits]
+        #print(self.prev_rows)
 
     def _obtain_final_parities(self, circuit, architecture, mode, **kwargs):
         # Calculate the final parity that needs to be added from the circuit and self.out_par

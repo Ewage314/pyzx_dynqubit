@@ -42,7 +42,7 @@ parser.add_argument("-q", "--qubits", nargs='+', default=None, type=int, help="T
 parser.add_argument("--metrics_csv", default=None, help="The location to store compiling metrics as csv, if not given, the metrics are printed.")
 #parser.add_argument("--n_compile", default=1, type=int, help="How often to run the Quilc compiler, since it is not deterministic.")
 parser.add_argument("--subfolder", default=None, type=str, nargs="+", help="Possible subfolders from the main QASM source to compile from. Less typing when source folders are in the same folder. Can also be used for subfiles.")
-parser.add_argument("--raw", default=False, type=bool, help="Whether the results should be raw or aggregated with mean/median/min/max")
+parser.add_argument("--raw", default=True, type=bool, help="Whether the results should be raw or aggregated with mean/median/min/max")
 parser.add_argument("--notes", default="", type=str, help="Extra notes that can be added to the csv")
 parser.add_argument("--placement", default=True, type=bool, help="Whether tket should optimize placement")
 parser.add_argument("--matroid", nargs='+', default="gray", choices=["matroid", "gray", "arianne", "both"], help="Whether the algorithm should use matroid partitioning for synthesis, otherwise it uses gray synth.")
@@ -53,6 +53,9 @@ parser.add_argument("--split_heuristic", nargs='+', default="count", choices=["r
 #parser.add_argument("-p", "--n_phase_layers", nargs='+', dest="phase_layers", default=1, type=int, help="Number of layers with phases in the circuits to be generated.")
 #parser.add_argument("-c", "--cnots_between_layers", nargs='+', dest="cnots", default=5, type=int, help="Number of CNOT gates between each phase layer in the circuits to be generated.")
 parser.add_argument("--density", nargs='+', type=float, help="The density probability for the dynamic_density architecture")
+parser.add_argument("--zeroes_rec", type=bool, default=False, help="Whether Arianne's method should pick the row to split on based on the most zeroes only.")
+parser.add_argument("--neighbor_path", type=bool, default=False, help="Whether Arianne's method should tie break neighbours based on the shortest path to the next 1.")
+parser.add_argument("--tie_break", type=bool, default=False, help="Whether Arianne's method should tie break based on previously placed CNOTs.")
 
 #TODO add PSO arguments
 
@@ -149,8 +152,15 @@ def main(args):
                         if root_heuristic == "model":
                             models = [pickle.load(open(filename, "rb")) for filename in glob.glob(architecture.name +"_model_"+"*.pickle")]
                         for split_heuristic in split_heurs:
-                                if method == "arianne" and len(synthesis_method) > 1:
-                                    m = ["steiner"]
+                                kwargs = {}
+                                if method == "arianne":
+                                    kwargs["zeroes_rec"] = args.zeroes_rec
+                                    kwargs["neighbor_path"] = args.neighbor_path
+                                    kwargs["tie_break"] = args.tie_break
+                                    if len(synthesis_method) > 1:
+                                        m = ["steiner"]
+                                    else:
+                                        m=mode
                                 else:
                                     m = mode
                                 if sources != []:
@@ -158,7 +168,7 @@ def main(args):
                                 else:
                                     print(circuits)
                                     files = ["GENERATED" for _ in circuits]
-                                results_df = map_phase_poly_circuits(circuits, architecture, m, files, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models)
+                                results_df = map_phase_poly_circuits(circuits, architecture, m, files, do_matroid=method, root_heuristic=root_heuristic, split_heuristic=split_heuristic, models=models, **kwargs)
                                 if not args.raw:
                                     kwargs = {"level":["mode", "#cnots_per_layer", "#phase_layers"]}
                                     results_df = concat([results_df.mean(**kwargs).add_suffix("_mean"), 

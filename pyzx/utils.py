@@ -28,3 +28,27 @@ def make_into_list(possible_list):
     if type(possible_list) != type([]):
         return [possible_list]
     return possible_list
+
+
+"Adapted from: https://stackoverflow.com/questions/3989016/how-to-find-all-positions-of-the-maximum-value-in-a-list"
+def maxelements(seq, key=None, reverse=False):
+    ''' Return list of position(s) of largest element '''
+    indices = []
+    if key is None:
+        key = lambda x:x
+    if reverse:
+        compare = lambda x,y: x <= y
+    else:
+        compare = lambda x,y: x >= y
+    if seq:
+        best_val = key(seq[0])
+        for i,val in enumerate(seq):
+            cur_val = key(val)
+            if compare(cur_val, best_val):
+                if cur_val == best_val:
+                    indices.append(i)
+                else:
+                    best_val = cur_val
+                    indices = [i]
+
+    return indices
