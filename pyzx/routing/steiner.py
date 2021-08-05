@@ -110,7 +110,8 @@ def steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, permu
 
 def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, permutation=None, **kwargs):
     """
-    Performs Gaussian elimination that is constraint bij the given architecture
+    Performs Gaussian elimination that is constraint bij the given architecture according to https://arxiv.org/pdf/1904.00633.pdf
+    Only works on full rank, square matrices.
     
     :param matrix: PyZX Mat2 matrix to be reduced
     :param architecture: The Architecture object to conform to
@@ -136,45 +137,66 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
     def steiner_reduce(col, root, nodes, usable_nodes, rec_nodes, upper):
         generator = steiner_reduce_column(architecture, [row[col] for row in matrix.data], root, nodes, usable_nodes, rec_nodes, upper)
         cnot = next(generator, None)
+        tree_nodes = []
         while cnot is not None:
+            tree_nodes.extend(cnot)
             row_add(*cnot)
             cnot = next(generator, None)
-    def rec_step(cols, rows):
-        size = len(rows)
-        # Upper triangular form uses the same structure.
+        return tree_nodes
+    def rec_step(qubit_removal_order):
+        # size, p_cols and pivot is needed if the matrix isn't square or of full rank
+        size = len(qubit_removal_order)
         p_cols = []
         pivot = 0
-        rows2 = [r for r in range(len(matrix.data[0])) if r in rows]
-        cols2 = [c for c in range(len(matrix.data)) if c in cols]
+        # Order the rows and columns to be ascending.
+        rows2 = [r for r in range(len(matrix.data[0])) if r in qubit_removal_order]
+        cols2 = [c for c in range(len(matrix.data)) if c in qubit_removal_order]
         for i, c in enumerate(cols2):
             if pivot < size:
-                nodes = [r for r in rows2[pivot:] if rows2[pivot]==r or matrix.data[r][c] == 1]
+                # Get all the nodes in the row below the diagonal (rows[i:]) where the entry equals 1 or it is the diagonal
+                nodes = [r for r in rows2[pivot:] if rows2[pivot]==r or matrix.data[r][c] == 1] 
+                # Perform the steiner_reduce on the current column (c) with root rows2[pivot] and you can use the full matrix
                 steiner_reduce(c, rows2[pivot], nodes, cols2[i:], [], True)
                 if matrix.data[rows2[pivot]][c] == 1:
                     p_cols.append(c)
                     pivot += 1
+        #Quick check upper triangular form - should never be printing!
+        if not all([all([matrix.data[i][j]== 0 for j in range(0, i)]) for i in range(size)]):
+            print("This should never be printed. If you read this, there is a bug in pyzx/routing/steiner.py line 163")
+            print()
+            print("not (upside-down) upper triangular form?")
+            for row in matrix.data:
+                print(row)
+            print("--------")
         # Full reduce requires the recursion
         if full_reduce:
             pivot -= 1
-            for i, c in enumerate(cols):
+            # Get the rows in the same order as the cols, but backwards because we are going backwards
+            rows = [i for i in reversed(qubit_removal_order) if i in rows2]
+            for i, c in enumerate(qubit_removal_order):
                 if c in p_cols:
-                    nodes = [r for r in rows if r==rows[pivot] or matrix.data[r][c] == 1]
-                    usable_nodes = cols[i:]
-                    #rec_nodes = list(set([node for edge in architecture.distances["upper"][c][(max(usable_nodes),c)][1] for node in edge]))
-                    #rec_nodes = [n for n in usable_nodes if n in rec_nodes]
+                    # Vertices we can still use steiner trees
+                    usable_nodes = qubit_removal_order[i:] # = R
+
+                    # Pick the maximal vertex k in R: k = max(usable_nodes)
+                    # Pick the maximal leaf k' in R: k' = cols[i] = c
+                    # Let W be the set of vertices in the shortest path from k' to k (inclusive)
                     rec_nodes = architecture.shortest_path(c, max(usable_nodes), usable_nodes) 
 
-                    if len(nodes) > 1:
-                        #print("-", c, nodes, cols, rec_nodes)
-                        steiner_reduce(c, rows[pivot], nodes, cols, rec_nodes, False)
+                    # Apply steiner up:
+                    # Pick the nodes of the steiner tree: all rows with a 1 in column c or the pivot row (diagonal)
+                    nodes = [r for r in rows if r==rows[pivot] or matrix.data[r][c] == 1]
+
+                    if len(nodes) > 1: # Otherwise it is the diagonal, which is trivial/done
+                        steiner_reduce(c, rows[pivot], nodes, usable_nodes, rec_nodes, False)
                         
-                    # Do recursion on the given nodes.
-                    if len(rec_nodes) > 1:
-                        rec_step(list(reversed(rec_nodes)), rec_nodes)
+                    # Do recursion on the recursive nodes that were allowed to break the the upper triangular form.
+                    if len(rec_nodes) > 1: # Trivial otherwise
+                        rec_step(list(reversed(rec_nodes)))
                 pivot -= 1
-        #return rank
+    # The qubit order is the order in which the spanning tree R is traversed
     qubit_order = architecture.reduce_order
-    rec_step(qubit_order, list(reversed(qubit_order)))
+    rec_step(qubit_order)
     #print("Done!")
 
 def steiner_reduce_column(architecture, col, root, nodes, usable_nodes, rec_nodes, upper):
@@ -198,7 +220,7 @@ def steiner_reduce_column(architecture, col, root, nodes, usable_nodes, rec_node
     else:
         debug and print("deal with zero root")
         if next_check is not None and col[next_check[0]] == 0:  # root is zero
-            print("WARNING : Root is 0 => reducing non-pivot column", col)
+            print("WARNING : Root is 0 => reducing non-pivot column", col, next_check[0])
         debug and print("Step 1: remove zeros", col)
         while next_check is not None:
             s0, s1 = next_check

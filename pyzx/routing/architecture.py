@@ -396,7 +396,8 @@ class Architecture():
             "nodes": nodes,
             "usable nodes": usable_nodes,
             "rec nodes": rec_nodes,
-            "upper": upper
+            "upper": upper,
+            "graph_trace": []
         }
         start = self.qubit_map[start]
         usable_nodes = [self.qubit_map[i] for i in usable_nodes]
@@ -407,14 +408,19 @@ class Architecture():
         vertices = [self.vertices[i] for i in usable_nodes]
         for edge in self.graph.edges():
             src, tgt = self.graph.edge_st(edge)
+            debug_trace["graph_trace"].append((src, tgt))
+            # Make sure that the edge is part of the subgraph spanned by vertices
             if src in vertices and tgt in vertices:
-                if upper or (src in rec_nodes and tgt in rec_nodes):
+                # If upper, we don't care about direction
+                # If one of the vertices in the edge are in rec_nodes, we don't care about direction either.
+                if upper or (src in rec_nodes or tgt in rec_nodes):
                     distances[(src, tgt)] = (1, [(src, tgt)])
                     distances[(tgt, src)] = (1, [(tgt, src)])
                 elif src > tgt:
                     distances[(src, tgt)] = (1, [(src, tgt)])
                 else:
                     distances[(tgt, src)] = (1, [(tgt, src)])
+        # The distance with yourself is 0 for each vertex
         for v in vertices:
             distances[(v, v)] = (0, [])
         for i, v0 in enumerate(vertices+vertices):
@@ -426,6 +432,9 @@ class Architecture():
                                     or distances[(v0, v2)][0] > distances[(v0, v1)][0] + distances[(v1, v2)][0]:
                                 distances[(v0, v2)] = (distances[(v0, v1)][0] + distances[(v1, v2)][0],
                                                         distances[(v0, v1)][1] + distances[(v1, v2)][1])
+                                # If upper, we know that direction doesn't matter, so the reverse is also true.
+                                # this can be found by future iterations so this is a speedup
+                                # Note that when using recursive nodes, we cannot always reverse the direction of the path.
                                 if upper:
                                     distances[(v2, v0)] = (distances[(v0, v1)][0] + distances[(v1, v2)][0],
                                                         distances[(v2, v1)][1] + distances[(v1, v0)][1])
@@ -437,13 +446,14 @@ class Architecture():
             options = [(node, v, *distances[(v, node)]) for node in nodes for v in (vertices + steiner_pnts) if
                         (v, node) in distances.keys()]
             if options == []:
-                print(nodes)
-                print(steiner_pnts, vertices)
-                print(distances)
-                print(usable_nodes)
-                print(rec_nodes)
-                print(self.reduce_order)
-                print(debug_trace)
+                print("Unable to create a steiner tree. No path can be found.")
+                print("nodes", nodes)
+                print("steiner nodes + all vertices", steiner_pnts, vertices)
+                print("distances", distances)
+                print("useable nodes", usable_nodes)
+                print("recursion nodes", rec_nodes)
+                print("reduce order", self.reduce_order)
+                print("debug trace", debug_trace)
                 self.visualize("debug.png")
                 print(self.name)
             best_option = min(options, key=lambda x: x[2])
