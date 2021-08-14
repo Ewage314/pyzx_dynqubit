@@ -8,7 +8,7 @@ import numpy as np
 
 from pyzx.linalg import Mat2
 from pyzx.routing.cnot_mapper import gauss, STEINER_MODE, GAUSS_MODE, GENETIC_STEINER_MODE, PSO_STEINER_MODE, cnot_fitness_func, sequential_gauss
-from pyzx.routing.architecture import create_architecture, REC_ARCH, SQUARE, IBMQ_SINGAPORE
+from pyzx.routing.architecture import Architecture, create_architecture, REC_ARCH, SQUARE, IBMQ_SINGAPORE, RIGETTI_16Q_ASPEN, architectures, dynamic_size_architectures, DENSITY, hamiltonian_path_architectures
 from pyzx.parity_maps import CNOT_tracker, build_random_parity_map
 from pyzx.machine_learning import GeneticAlgorithm
 from pyzx.circuit import CNOT
@@ -19,8 +19,8 @@ SEED = 42
 class TestSteiner(unittest.TestCase):
 
     def setUp(self):
-        self.n_tests = 5
-        self.arch = create_architecture(IBMQ_SINGAPORE)
+        self.n_tests = 10
+        self.arch = create_architecture(SQUARE, n_qubits=9) #Needs to have a square number of qubits to test the square architecture.
         self.n_qubits = self.arch.n_qubits
         depth = 20
         self.circuit = [CNOT_tracker(self.arch.n_qubits) for _ in range(self.n_tests)]
@@ -31,11 +31,17 @@ class TestSteiner(unittest.TestCase):
             for g in c.gates:
                 self.aggr_circ.add_gate(g)
 
-    def assertGates(self, circuit):
+    def assertGates(self, circuit, architecture=None):
+        if architecture is None:
+            architecture = self.arch
         for gate in circuit.gates:
             if hasattr(gate, "name") and gate.name == "CNOT":
-                edge = (gate.control, gate.target)
-                self.assertTrue(edge in self.arch.graph.edges() or tuple(reversed(edge)) in self.arch.graph.edges())
+                qubits = (gate.control, gate.target)
+                edge = (architecture.qubit2vertex(qubits[0]), architecture.qubit2vertex(qubits[1]))
+                edges = list(architecture.graph.edges())
+                edges += [tuple(reversed(edge)) for edge in edges]
+                self.assertIn(edge, edges)
+                #self.assertTrue(edge in architecture.graph.edges() or tuple(reversed(edge)) in architecture.graph.edges())
 
     def assertMat2Equal(self, m1, m2, triangle=False):
         if triangle:
@@ -89,6 +95,33 @@ class TestSteiner(unittest.TestCase):
                     self.assertEqual(distance, len(path))
     """
 
+    def test_architectures(self):
+        for i in range(self.n_tests):
+            for name in architectures:
+                #print("Testing", name)
+                if name in dynamic_size_architectures:
+                    if name not in hamiltonian_path_architectures:
+                        #continue
+                        # This is DENSITY and it gets in an infinite loop when building steiner trees!
+                        architecture = create_architecture(name, n_qubits=self.n_qubits)
+                    else:
+                        try:
+                            architecture = create_architecture(name, n_qubits=self.n_qubits)
+                        except KeyError as e:
+                            if name == SQUARE:
+                                print("WARNING! skipping SQUARE architecture due to non-square number of qubits:", self.n_qubits)
+                            else:
+                                raise e                        
+                elif name in hamiltonian_path_architectures:
+                    architecture = create_architecture(name)
+                else:
+                    architecture = create_architecture(name)
+                architecture.visualize(name+".png")
+                if self.n_qubits == architecture.n_qubits:
+                    with self.subTest(i=i, arch=architecture.name):
+                        self.do_gauss(STEINER_MODE, self.matrix[i], architecture=architecture)
+
+
     def test_all_cnots_valid(self):
         for i in range(self.n_tests):
             with self.subTest(i=i):
@@ -97,11 +130,13 @@ class TestSteiner(unittest.TestCase):
                 _ = gauss(STEINER_MODE, matrix, architecture=self.arch, full_reduce=True, y=circuit)
                 self.assertGates(circuit)
 
-    def do_gauss(self, mode, array, full_reduce=True, with_assert=True):
+    def do_gauss(self, mode, array, full_reduce=True, with_assert=True, architecture=None):
+        if architecture is None:
+            architecture = self.arch
         circuit = CNOT_tracker(self.arch.n_qubits)
         matrix = Mat2(np.copy(array))
-        rank = gauss(mode, matrix, architecture=self.arch, full_reduce=full_reduce, y=circuit)
-        with_assert and mode == STEINER_MODE and self.assertGates(circuit)
+        rank = gauss(mode, matrix, architecture=architecture, full_reduce=full_reduce, y=circuit)
+        with_assert and mode == STEINER_MODE and self.assertGates(circuit, architecture)
         with_assert and full_reduce and self.assertCircuitEquivalentNdArr(circuit, array)
         return circuit, matrix, rank
 
@@ -174,7 +209,7 @@ class TestSteiner(unittest.TestCase):
                         with self.subTest(i=(p, mode, permute_input, permute_output)):
                             circuits, perms, score = sequential_gauss([Mat2(np.copy(m)) for m in matrices], mode=mode, architecture=self.arch, full_reduce=True, 
                                                                         n_steps=5, swarm_size=10, population_size=5, n_iterations=5, input_perm=permute_input, output_perm=permute_output) # It doesn't need to find an optimized solution, it only needs to do a non-trivial run
-                            print(mode, score)
+                            #print(mode, score)
                             if not permute_input:
                                 self.assertListEqual(perms[0].tolist(), [i for i in range(self.n_qubits)])
                             if not permute_output:

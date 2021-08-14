@@ -692,7 +692,9 @@ class PhasePoly():
         def base_recurse(cols_to_use, qubits_to_use):
             if qubits_to_use != [] and cols_to_use != []:
                 # Select edge qubits
-                qubits = architecture.non_cutting_vertices(qubits_to_use) 
+                vertices_to_use = [architecture.qubit2vertex(q) for q in qubits_to_use]
+                vertices = architecture.non_cutting_vertices(vertices_to_use) 
+                qubits = [architecture.vertex2qubit(v) for v in vertices]
                 # Pick the qubit where the recursion split will be most skewed.
 
                 if zeroes_rec:

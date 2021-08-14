@@ -192,7 +192,6 @@ def main(args):
                                 results_df["matroid"] = method
                                 results_df["root_heuristic"] = root_heuristic
                                 results_df["split_heuristic"] = split_heuristic 
-                                results_df["arch_density"] = architecture.density
                                 results_df["architecture"] = architecture.name
                                 results_df.set_index(["idx", "mode", "file"], inplace=True, append=True)
                                 all_results.append(results_df)

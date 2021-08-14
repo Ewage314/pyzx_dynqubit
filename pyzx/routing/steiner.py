@@ -124,80 +124,75 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
         permutation = [i for i in range(len(matrix.data))]
     else:
         matrix = Mat2([[row[i] for i in permutation] for row in matrix.data])
-    #print(matrix)
+
     def row_add(c0, c1):
         matrix.row_add(c0, c1)
         #c0 = permutation[c0]
         #c1 = permutation[c1]
         debug and print("Reducing", c0, c1)
-        c0 = architecture.qubit_map[c0]
-        c1 = architecture.qubit_map[c1]
+        #c0 = architecture.qubit2vertex(c0)
+        #c1 = architecture.qubit2vertex(c1)
         if x != None: x.row_add(c0, c1)
         if y != None: y.col_add(c1, c0)
+
     def steiner_reduce(col, root, nodes, usable_nodes, rec_nodes, upper):
+        if not all([q in usable_nodes for q in nodes]):
+            raise Exception("Terminals not in the subgraph "+ str(upper) + str((col, root, nodes, usable_nodes, rec_nodes))+ "\n"+str(debug_trace))
         generator = steiner_reduce_column(architecture, [row[col] for row in matrix.data], root, nodes, usable_nodes, rec_nodes, upper)
         cnot = next(generator, None)
         tree_nodes = []
         while cnot is not None:
+            if cnot[0] not in usable_nodes+rec_nodes or cnot[1] not in usable_nodes + rec_nodes:
+                raise Exception("Steiner tree not sticking to constraints")
             tree_nodes.extend(cnot)
             row_add(*cnot)
             cnot = next(generator, None)
         return tree_nodes
+
     def rec_step(qubit_removal_order):
         # size, p_cols and pivot is needed if the matrix isn't square or of full rank
         size = len(qubit_removal_order)
-        p_cols = []
-        pivot = 0
         # Order the rows and columns to be ascending.
-        rows2 = [r for r in range(len(matrix.data[0])) if r in qubit_removal_order]
-        cols2 = [c for c in range(len(matrix.data)) if c in qubit_removal_order]
-        for i, c in enumerate(cols2):
-            if pivot < size:
-                # Get all the nodes in the row below the diagonal (rows[i:]) where the entry equals 1 or it is the diagonal
-                nodes = [r for r in rows2[pivot:] if rows2[pivot]==r or matrix.data[r][c] == 1] 
-                # Perform the steiner_reduce on the current column (c) with root rows2[pivot] and you can use the full matrix
-                steiner_reduce(c, rows2[pivot], nodes, cols2[i:], [], True)
-                if matrix.data[rows2[pivot]][c] == 1:
-                    p_cols.append(c)
-                    pivot += 1
+        pivots = list(sorted(qubit_removal_order))
+        for pivot_idx, c in enumerate(pivots):
+            # Get all the nodes in the row below the diagonal (rows[i:]) where the entry equals 1 or it is the diagonal
+            nodes = [r for r in pivots[pivot_idx:] if c==r or matrix.data[r][c] == 1] 
+            # Perform the steiner_reduce on the current column (c) with root rows2[pivot] and you can use the full matrix
+            steiner_reduce(c, c, nodes, pivots[pivot_idx:], [], True)
         #Quick check upper triangular form - should never be printing!
         if not all([all([matrix.data[i][j]== 0 for j in range(0, i)]) for i in range(size)]):
-            print("This should never be printed. If you read this, there is a bug in pyzx/routing/steiner.py line 163")
+            print("This should never be printed. If you read this, there is a bug around pyzx/routing/steiner.py line 163")
             print()
-            print("not (upside-down) upper triangular form?")
+            print("not upper triangular form?")
             for row in matrix.data:
                 print(row)
             print("--------")
         # Full reduce requires the recursion
         if full_reduce:
-            pivot -= 1
-            # Get the rows in the same order as the cols, but backwards because we are going backwards
-            rows = [i for i in reversed(qubit_removal_order) if i in rows2]
+            # We precalculated the maximal leafs in R (in the qubit_removal_order)
             for i, c in enumerate(qubit_removal_order):
-                if c in p_cols:
-                    # Vertices we can still use steiner trees
-                    usable_nodes = qubit_removal_order[i:] # = R
+                # Vertices we can still use steiner trees
+                usable_nodes = qubit_removal_order[i:] # = R
 
-                    # Pick the maximal vertex k in R: k = max(usable_nodes)
-                    # Pick the maximal leaf k' in R: k' = cols[i] = c
-                    # Let W be the set of vertices in the shortest path from k' to k (inclusive)
-                    rec_nodes = architecture.shortest_path(c, max(usable_nodes), usable_nodes) 
+                # Pick the maximal vertex k in R: k = max(usable_nodes)
+                # Pick the maximal leaf k' in R: k' = cols[i] = c
+                # Let W be the set of vertices in the shortest path from k' to k (inclusive)
+                path = architecture.shortest_path(c, max(usable_nodes))#, usable_nodes) 
+                rec_qubits = [architecture.vertex2qubit(v) for v in path]
 
-                    # Apply steiner up:
-                    # Pick the nodes of the steiner tree: all rows with a 1 in column c or the pivot row (diagonal)
-                    nodes = [r for r in rows if r==rows[pivot] or matrix.data[r][c] == 1]
+                # Apply steiner up:
+                # Pick the nodes of the steiner tree: all rows with a 1 in column c or the pivot row (diagonal)
+                nodes = [r for r in usable_nodes if (r==c or matrix.data[r][c] == 1)]
 
-                    if len(nodes) > 1: # Otherwise it is the diagonal, which is trivial/done
-                        steiner_reduce(c, rows[pivot], nodes, usable_nodes, rec_nodes, False)
-                        
-                    # Do recursion on the recursive nodes that were allowed to break the the upper triangular form.
-                    if len(rec_nodes) > 1: # Trivial otherwise
-                        rec_step(list(reversed(rec_nodes)))
-                pivot -= 1
+                if len(nodes) > 1: # Otherwise it is the diagonal, which is trivial/done
+                    steiner_reduce(c, c, nodes, usable_nodes, rec_qubits, False)
+
+                # Do recursion on the recursive nodes that were allowed to break the the upper triangular form.
+                if len(rec_qubits) > 1: # Trivial otherwise
+                    rec_step(list(reversed(rec_qubits)))#[n for n in rows if n in rec_qubits])
+
     # The qubit order is the order in which the spanning tree R is traversed
-    qubit_order = architecture.reduce_order
-    rec_step(qubit_order)
-    #print("Done!")
+    rec_step(architecture.reduce_order)
 
 def steiner_reduce_column(architecture, col, root, nodes, usable_nodes, rec_nodes, upper):
     steiner_tree = architecture.rec_steiner_tree(root, nodes, usable_nodes, rec_nodes, upper)
