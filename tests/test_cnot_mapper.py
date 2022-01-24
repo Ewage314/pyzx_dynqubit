@@ -19,7 +19,7 @@ SEED = 42
 class TestSteiner(unittest.TestCase):
 
     def setUp(self):
-        self.n_tests = 10
+        self.n_tests = 1
         self.arch = create_architecture(SQUARE, n_qubits=9) #Needs to have a square number of qubits to test the square architecture.
         self.n_qubits = self.arch.n_qubits
         depth = 20

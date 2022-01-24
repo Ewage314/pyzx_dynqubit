@@ -16,8 +16,8 @@ from pyzx.routing.architecture import create_architecture
 from pyzx.extract import permutation_as_swaps
 
 
-from pytket.pyzx import pyzx_to_tk
-from pytket.backends.ibm import AerStateBackend
+#from pytket.pyzx import pyzx_to_tk
+#from pytket.backends.ibm import AerStateBackend
 
 SEED = 42
 

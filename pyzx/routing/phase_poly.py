@@ -24,7 +24,7 @@ from ..parity_maps import build_random_parity_map, CNOT_tracker
 from ..graph.graph import  Graph
 from ..linalg import Mat2
 from ..routing.cnot_mapper import sequential_gauss, GAUSS_MODE, STEINER_MODE, TKET_COMPILER, gauss
-from ..routing.tket_router import get_tk_architecture, pyzx_to_tk, Placement, OpType
+from ..routing.tket_router import get_tk_architecture, OpType
 from ..routing.steiner import steiner_reduce_column
 from ..routing.architecture import create_architecture, FULLY_CONNNECTED, Architecture
 from ..utils import make_into_list, maxelements
@@ -45,6 +45,7 @@ def route_phase_poly(circuit, architecture, mode, do_matroid="gray", split_heuri
         new_circuit = phase_poly.matroid_synth(mode, architecture, **kwargs)[0]
     elif do_matroid == "arianne":
         new_circuit = phase_poly.Ariannes_synth(mode, architecture, **kwargs)[0]
+        """
     elif do_matroid == "both":
         circuit1 = phase_poly.Ariannes_synth(mode, architecture, **kwargs)[0]
         circuit2 = phase_poly.rec_gray_synth(mode, architecture, split_heuristic=split_heuristic, root_heuristic=root_heuristic, **kwargs)[0]
@@ -54,6 +55,7 @@ def route_phase_poly(circuit, architecture, mode, do_matroid="gray", split_heuri
             new_circuit = circuit1
         else:
             new_circuit = circuit2
+            """
     elif do_matroid == "gray":
         new_circuit = phase_poly.rec_gray_synth(mode, architecture, split_heuristic=split_heuristic, root_heuristic=root_heuristic, **kwargs)[0]
     return new_circuit

@@ -1,7 +1,7 @@
-from pytket.pyzx import pyzx_to_tk, tk_to_pyzx
-from pytket.routing import route, Architecture, QubitMap, Placement
+#from pytket.pyzx import pyzx_to_tk, tk_to_pyzx
+from pytket.routing import route, Architecture, Placement
 from pytket.transform import Transform
-from pytket import OpType, UnitID
+from pytket import OpType #, UnitID
 
 from ..circuit import Circuit, ZPhase, CNOT
 
@@ -14,7 +14,7 @@ def route_tket(circuit, architecture, initial_mapping=None):
     if initial_mapping is None:
         outcirc = route(tk_circuit, arch)
     else:
-        qmap = QubitMap()
+        qmap = QubitMap() #TODO fix pytket version problems. QubitMap and UnitID is not in .routing anymore.
         for i, j in enumerate(initial_mapping):
             qmap[UnitID('q', i)] = UnitID('node', j) # TODO make flatnode into node once pytket is updated to 0.4
         outcirc = route(tk_circuit, arch, initial_map=qmap)
