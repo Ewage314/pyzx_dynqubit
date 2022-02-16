@@ -17,18 +17,20 @@ from ..machine_learning import GeneticAlgorithm, ParticleSwarmOptimization
 from ..utils import make_into_list
 #from .steiner import steiner_gauss
 from .steiner import rec_steiner_gauss as steiner_gauss
+from .steiner import rowcol
 
 debug = False
 
 # ELIMINATION MODES:
 GAUSS_MODE = "gauss"
 STEINER_MODE = "steiner"
+ROWCOL_MODE = "rowcol"
 GENETIC_STEINER_MODE = "genetic_steiner"
 GENETIC_GAUSS_MODE = "genetic_gauss"
 PSO_GAUSS_MODE = "pso_gauss"
 PSO_STEINER_MODE = "pso_steiner"
 
-elim_modes = [STEINER_MODE, GAUSS_MODE, GENETIC_STEINER_MODE, GENETIC_GAUSS_MODE]
+elim_modes = [STEINER_MODE, ROWCOL_MODE, GAUSS_MODE, GENETIC_STEINER_MODE, GENETIC_GAUSS_MODE]
 genetic_elim_modes = [GENETIC_STEINER_MODE, GENETIC_GAUSS_MODE]
 pso_elim_modes = [PSO_GAUSS_MODE, PSO_STEINER_MODE]
 basic_elim_modes = [STEINER_MODE, GAUSS_MODE]
@@ -147,6 +149,64 @@ class StepFunction():
         #new_perms[0] = perms[-1] 
         return new_perms[-1], (circs, perms), score
 
+def permute_matrix(mat2_matrix, permuation):
+    perm_matrix = ...
+    return Mat2(perm_matrix)
+
+def reverse_traversal(mode, matrix, architecture=None, initial_permutation=None, max_iter=100, max_step_gap=None, **kwargs):
+    best_count = None
+    best_solution = None
+    step = 0
+    best_step = 0
+    n_qubits = len(matrix.data)
+    if max_step_gap is None:
+        max_step_gap = max_iter
+    if architecture is None:
+        print(
+                "\033[91m Warning: Architecture is not given, assuming fully connected architecture of size matrix.shape[0]. \033[0m ")
+        architecture = create_fully_connected_architecture(n_qubits)
+    if initial_permutation is None:
+        initial_permutation = np.arange(n_qubits)
+    final_permutation = initial_permutation.copy()
+    reverse_matrix = matrix.inverse()
+    while step < max_iter or step-best_step < max_step_gap:
+        # Adjust the matrix to represent the initial qubit placement. i.e. swap the rows.
+        perm_matrix = permute_matrix(matrix, initial_permutation)
+
+        compiled_circuit = CNOT_tracker(n_qubits)
+        rank = gauss(mode, perm_matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
+
+        if mode == ROWCOL_MODE: # TODO make reverse traversal work for GENETIC_STEINER_MODE
+            final_permutation = rank
+
+        if best_count is None or best_count > compiled_circuit.gather_metrics["n_cnots"]:
+            best_count = compiled_circuit.gather_metrics["n_cnots"]
+            best_circuit = CNOT_tracker(n_qubits)
+            for gate in reversed(compiled_circuit.gates):
+                best_circuit.add_gate(gate)
+            best_solution = best_circuit, initial_permutation, final_permutation
+            best_step = step
+
+        if mode != ROWCOL_MODE:  # TODO make reverse traversal work for GENETIC_STEINER_MODE
+            break
+        # Reverse traversal step
+
+        # adjust the reverse matrix to represent the final_permutation as new initial qubit placement
+        perm_matrix = permute_matrix(reverse_matrix, initial_permutation)
+
+        compiled_circuit = CNOT_tracker(n_qubits)
+        initial_permutation = gauss(mode, perm_matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
+
+        if best_count is None or best_count > compiled_circuit.gather_metrics["n_cnots"]:
+            best_count = compiled_circuit.gather_metrics["n_cnots"]
+            best_circuit = CNOT_tracker(n_qubits)
+            for gate in reversed(compiled_circuit.gates):
+                best_circuit.add_gate(gate)
+            best_solution = best_circuit, initial_permutation, final_permutation
+            best_step = step
+        
+        step += 1
+    return best_solution
 
 def gauss(mode, matrix, architecture=None, permutation=None, try_transpose=False, **kwargs):
     """
@@ -194,6 +254,12 @@ def gauss(mode, matrix, architecture=None, permutation=None, try_transpose=False
                 "\033[91m Warning: Architecture is not given, assuming fully connected architecture of size matrix.shape[0]. \033[0m ")
             architecture = create_fully_connected_architecture(len(matrix.data))
         rank =  steiner_gauss(matrix, architecture, permutation=permutation, **kwargs)
+    elif mode == ROWCOL_MODE:
+        if architecture is None:
+            print(
+                "\033[91m Warning: Architecture is not given, assuming fully connected architecture of size matrix.shape[0]. \033[0m ")
+            architecture = create_fully_connected_architecture(len(matrix.data))
+        rank =  rowcol(matrix, architecture, permutation=permutation, **kwargs)
     elif mode == GENETIC_STEINER_MODE:
         perm, circuit, rank = permutated_gauss(matrix, STEINER_MODE, architecture=architecture, permutation=permutation, **kwargs)
         #return rank

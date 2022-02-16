@@ -180,7 +180,8 @@ class Architecture():
             if self._non_cutting_vertices is None:
                 self._non_cutting_vertices = {}
             cur_dict = self._non_cutting_vertices
-            for q in sorted([v for i, v in enumerate(self.vertices) if i not in subgraph_vertices]):
+            for q in sorted([v for i, v in enumerate(self.vertices) if i in subgraph_vertices]):
+                # TODO remember what this for loop is supposed to do, because this seems to be an expensive way to say cur_dict={}.
                 if q not in cur_dict.keys():
                     cur_dict[q] = {}
                 cur_dict = cur_dict[q]
@@ -458,7 +459,7 @@ class Architecture():
 
     def rec_steiner_tree(self, start_qubit, terminal_qubits, usable_qubits, rec_qubits, upper=True):
         if not all([q in usable_qubits for q in terminal_qubits]):
-            raise Exception("Terminals not in the subgraph")
+            raise Exception("Terminals not in the subgraph." + str(terminal_qubits) + str(usable_qubits))
         # Builds the steiner tree with start as root, contains at least nodes and at most useable_nodes
         debug_trace = {
             "start":start_qubit,

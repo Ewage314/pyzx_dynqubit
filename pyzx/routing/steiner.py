@@ -43,7 +43,7 @@ def steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, permu
         matrix.row_add(c0, c1)
         #c0 = permutation[c0]
         #c1 = permutation[c1]
-        debug and print("Reducing", c0, c1)
+        debug and print("Row addition", c0, c1)
         if x != None: x.row_add(c0, c1)
         if y != None: y.col_add(c1, c0)
     def steiner_reduce(col, root, nodes, upper):
@@ -194,6 +194,160 @@ def rec_steiner_gauss(matrix, architecture, full_reduce=False, x=None, y=None, p
     # The qubit order is the order in which the spanning tree R is traversed
     rec_step(architecture.reduce_order)
 
+def rowcol(matrix, architecture, full_reduce=True, x=None, y=None, permutation=None, **kwargs):
+    """
+    https://arxiv.org/pdf/1910.14478.pdf
+    """
+    def row_add(c0, c1):
+        matrix.row_add(c0, c1)
+        #c0 = permutation[c0]
+        #c1 = permutation[c1]
+        debug and print("Row Addition", c0, c1)
+        #c0 = architecture.qubit2vertex(c0)
+        #c1 = architecture.qubit2vertex(c1)
+        if x != None: x.row_add(c0, c1)
+        if y != None: y.col_add(c1, c0)
+
+    debug and print(architecture.name)
+    rowcols_to_eliminate = [i for i in range(len(matrix.data))]
+    while len(rowcols_to_eliminate) > 1:
+        # Pick a vertex to remove - Step 1
+        options = architecture.non_cutting_vertices(rowcols_to_eliminate)
+        choice = architecture.vertex2qubit(options[0]) # TODO make these choices smarter
+
+        debug and print("ROWCOL - ", choice, rowcols_to_eliminate)
+        debug and print(matrix)
+
+        # Eliminate the column - Step 2-5
+        debug and print("Eliminate the column")
+        nodes = [i for i, row in enumerate(matrix.data) if row[choice] == 1]
+        if any([i not in rowcols_to_eliminate for i in nodes]):
+            print("Row not correctly reduced in previous step!")
+            print(matrix)
+            input('Any key to continue.')
+        edges = []
+        steiner_tree = architecture.rec_steiner_tree(choice, nodes, rowcols_to_eliminate, [], True) 
+        edge = next(steiner_tree)
+        while edge is not None: # ignore, this is pre-order traversal
+            edge = next(steiner_tree)
+        edge = next(steiner_tree)
+        while edge is not None: #Step 4
+            edges.append(edge) # Remember the edges for the next postorder traversal of the tree.
+            if matrix.data[edge[1]][choice] == 1 and matrix.data[edge[0]][choice] == 0:
+                row_add(edge[1], edge[0])
+            edge = next(steiner_tree)
+        for edge in edges: # step 5
+            row_add(edge[0], edge[1])
+
+        # Eliminate the row - Step 6-10
+        debug and print("Eliminate the row")
+        #debug and print(matrix)
+        # System of linear equations https://stackabuse.com/solving-systems-of-linear-equations-with-pythons-numpy/
+        A_inv = Mat2([[matrix.data[row][col] for row in rowcols_to_eliminate if row != choice] for col  in rowcols_to_eliminate if col != choice]).inverse() # np.linalg.inv does not work on boolean matrices.
+        B = np.array([matrix.data[choice][col] for col in rowcols_to_eliminate if col != choice])
+        X = np.array(A_inv.data).dot(B)%2
+        find_index = lambda i: [j for j in rowcols_to_eliminate if j != choice].index(i)
+        nodes = [i for i in rowcols_to_eliminate if i == choice or X[find_index(i)]] # This is S'
+        debug and print("System solution - X", X)
+        debug and print("Rows to add", nodes)
+        debug and print("Pre-calculated outcome of adding those rows.", [ sum([matrix.data[r][c] for r in nodes])%2 for c in rowcols_to_eliminate])
+
+        steiner_tree = architecture.rec_steiner_tree(choice, nodes, rowcols_to_eliminate, [], True) # step 7
+        edge = next(steiner_tree)
+        while edge is not None: # step 8
+            if edge[1] not in nodes:
+                row_add(edge[1], edge[0])
+            edge = next(steiner_tree)
+        edge = next(steiner_tree)
+        while edge is not None: #Step 9
+            row_add(edge[1], edge[0])
+            edge = next(steiner_tree)
+        rowcols_to_eliminate.remove(choice) # step 10
+    return None
+
+def permrowcol(matrix, architecture, full_reduce=True, x=None, y=None, **kwargs):
+
+    def row_add(c0, c1):
+        matrix.row_add(c0, c1)
+        debug and print("Row Addition", c0, c1)
+        if x != None: x.row_add(c0, c1)
+        if y != None: y.col_add(c1, c0)
+
+    debug = False
+    debug and print(architecture.name)
+    cols_to_eliminate = [i for i in range(len(matrix.data))]
+    rows_to_eliminate = [i for i in range(len(matrix.data))]
+    output_permutation = [None]*len(matrix.data)
+
+    while len(rows_to_eliminate) > 1:
+        # Pick a vertex to remove - Step 1
+        options = [architecture.vertex2qubit(v) for v in architecture.non_cutting_vertices(rows_to_eliminate)]
+        # Pick the row with the least ones.
+        chosen_row = options[np.argmin([sum(matrix.data[i]) for i in options])]
+        # Pick target register for logical qubit choice on original register options[0].
+        # Pick the column with a 1 in chosen_row and the least ones in the column
+        chosen_column = cols_to_eliminate[np.argmin([sum(matrix.data[i]) if matrix.data[chosen_row][i] == 1 else architecture.n_qubits for i in cols_to_eliminate])] 
+
+        debug and print("ROWCOL - ", chosen_row, chosen_column, rows_to_eliminate, cols_to_eliminate)
+        debug and print(matrix)
+
+        # Eliminate the column - Step 2-5
+        debug and print("Eliminate the column")
+        nodes = [i for i, row in enumerate(matrix.data) if row[chosen_column] == 1]
+        debug and print(nodes)
+        if any([i not in rows_to_eliminate for i in nodes]):
+            print("Row not correctly reduced in previous step!")
+            print(matrix)
+            input('Any key to continue.')
+        edges = []
+        steiner_tree = architecture.rec_steiner_tree(chosen_row, nodes, rows_to_eliminate, [], True) 
+        edge = next(steiner_tree)
+        while edge is not None: # ignore, this is pre-order traversal
+            edge = next(steiner_tree)
+        edge = next(steiner_tree)
+        while edge is not None: #Step 4
+            edges.append(edge) # Remember the edges for the next postorder traversal of the tree.
+            if matrix.data[edge[1]][chosen_column] == 1 and matrix.data[edge[0]][chosen_column] == 0:
+                row_add(edge[1], edge[0])
+            edge = next(steiner_tree)
+        for edge in edges: # step 5
+            row_add(edge[0], edge[1])
+
+        # Eliminate the row - Step 6-10
+        debug and print("Eliminate the row")
+        debug and print(matrix)
+        # System of linear equations https://stackabuse.com/solving-systems-of-linear-equations-with-pythons-numpy/
+        A_inv = Mat2([[matrix.data[row][col] for row in rows_to_eliminate if row != chosen_row] for col  in cols_to_eliminate if col != chosen_column]).inverse() # np.linalg.inv does not work on boolean matrices.
+        B = np.array([matrix.data[chosen_row][col] for col in cols_to_eliminate if col != chosen_column])
+        X = np.array(A_inv.data).dot(B)%2
+        find_index = lambda i: [j for j in rows_to_eliminate if j != chosen_row].index(i) # We will be adding rows together
+        nodes = [i for i in rows_to_eliminate if i == chosen_row or X[find_index(i)]] # This is S'
+        #debug and print("System solution - X", X)
+        #debug and print("Rows to add", nodes)
+        #debug and print("Pre-calculated outcome of adding those rows.", [ sum([matrix.data[r][c] for r in nodes])%2 for c in cols_to_eliminate])
+
+        steiner_tree = architecture.rec_steiner_tree(chosen_row, nodes, rows_to_eliminate, [], True) # step 7
+        edge = next(steiner_tree)
+        while edge is not None: # step 8
+            if edge[1] not in nodes:
+                row_add(edge[1], edge[0])
+            edge = next(steiner_tree)
+        edge = next(steiner_tree)
+        while edge is not None: #Step 9
+            row_add(edge[1], edge[0])
+            edge = next(steiner_tree)
+        output_permutation[chosen_column] = chosen_row
+        rows_to_eliminate.remove(chosen_row) # step 10
+        cols_to_eliminate.remove(chosen_column)
+    chosen_row = rows_to_eliminate[0]
+    chosen_column = cols_to_eliminate[0]
+    output_permutation[chosen_column] = chosen_row
+    if matrix.data[chosen_row][chosen_column] != 1:
+        print("This should not happen")
+    debug and print("FINAL MATRIX\n", matrix)
+    debug and print(output_permutation)
+    return np.array(output_permutation)
+
 def steiner_reduce_column(architecture, col, root, nodes, usable_nodes, rec_nodes, upper):
     steiner_tree = architecture.rec_steiner_tree(root, nodes, usable_nodes, rec_nodes, upper)
     # Remove all zeros
@@ -204,6 +358,7 @@ def steiner_reduce_column(architecture, col, root, nodes, usable_nodes, rec_node
         while next_check is not None:
             s0, s1 = next_check
             if col[s0] == 0:  # s1 is a new steiner point or root = 0
+                #if s1 not in nodes or s0 == root:
                 zeros.append(next_check)
             next_check = next(steiner_tree)
         while len(zeros) > 0:
