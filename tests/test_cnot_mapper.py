@@ -215,6 +215,15 @@ class TestSteiner(unittest.TestCase):
                 permutation = permrowcol(matrix, architecture, y=circuit)
                 undo_perm = self.reverse_permutation(permutation)
                 self.assertNdArrEqual(np.asarray(matrix.data)[:, undo_perm], np.identity(len(matrix.data)))
+                """
+                print(i)
+                print(np.array(self.matrix[i].data))
+                print(permutation)
+                print(np.asarray(circuit.matrix.data))
+                print(circuit.gates)
+                print(np.asarray(circuit.matrix.data)[:, permutation])
+                input("check")
+                """
                 self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, permutation], self.matrix[i].data)
                 ng3 += circuit.gather_metrics()["n_cnots"]
                 d3 += circuit.gather_metrics()["depth"]
@@ -229,9 +238,60 @@ class TestSteiner(unittest.TestCase):
         print(d1/self.n_tests, d2/self.n_tests, d3/self.n_tests, d4/self.n_tests)
 
     def test_reverse_traversal(self):
+        print("Skipping reverse traversal tests")
         for i in range(self.n_tests):
             with self.subTest(i=i):
-                # TODO implement!
+                return
+                architecture = self.arch
+                array = np.copy(self.matrix[i].data)
+                print("Test", i)
+                print(np.array(self.matrix[i].data))
+                circuit, initial_permutation, output_permutation = reverse_traversal(Mat2(array), architecture)
+                undo_perm = self.reverse_permutation(initial_permutation)
+                print(initial_permutation, output_permutation)
+                print(np.array(circuit.matrix.data))
+                print(np.asarray(circuit.matrix.data)[:, output_permutation][initial_permutation])
+                #input("next")
+                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, output_permutation][initial_permutation], self.matrix[i].data)
+
+    def test_reverse_traversal_each_step(self):
+        for i in range(self.n_tests):
+            with self.subTest(i=i):
+                return #TODO
+                architecture = self.arch
+                best = None
+                for max_iter in range(1, 100):
+                    array = np.copy(self.matrix[i].data)
+                    circuit = CNOT_tracker(self.arch.n_qubits)
+                    matrix = Mat2(array)
+                    permutation = reverse_traversal(matrix, architecture, max_iter=max_iter, y=circuit)
+                    undo_perm = self.reverse_permutation(permutation)
+                    self.assertNdArrEqual(np.asarray(matrix.data)[:, undo_perm], np.identity(len(matrix.data)))
+                    self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, permutation], self.matrix[i].data)
+                    cnots = circuit.gather_metrics["n_cnots"]
+                    if best is not None:
+                        self.assertLessEqual(best, cnots)
+                    best = cnots
+
+    def test_reverse_traversal_step_gap(self):
+        for i in range(self.n_tests):
+            with self.subTest(i=i):
+                return # TODO figure out how to test the max_step_gap parameter.
+                architecture = self.arch
+                best = None
+                for step_gap in range(100):
+                    array = np.copy(self.matrix[i].data)
+                    circuit = CNOT_tracker(self.arch.n_qubits)
+                    matrix = Mat2(array)
+                    permutation = reverse_traversal(matrix, architecture, max_iter=max_iter, y=circuit)
+                    undo_perm = self.reverse_permutation(permutation)
+                    self.assertNdArrEqual(np.asarray(matrix.data)[:, undo_perm], np.identity(len(matrix.data)))
+                    self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, permutation], self.matrix[i].data)
+                    cnots = circuit.gather_metrics["n_cnots"]
+                    if best is not None:
+                        self.assertLessEqual(best, cnots)
+                    best = cnots
+                    
 
     def test_genetic_optimization(self):
         if SKIP_LONG_TESTS: 

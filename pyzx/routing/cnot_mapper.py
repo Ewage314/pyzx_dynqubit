@@ -16,7 +16,7 @@ from ..parity_maps import CNOT_tracker
 from ..machine_learning import GeneticAlgorithm, ParticleSwarmOptimization
 from ..utils import make_into_list
 #from .steiner import steiner_gauss
-from .steiner import rec_steiner_gauss as steiner_gauss
+from .steiner import permrowcol, rec_steiner_gauss as steiner_gauss
 from .steiner import rowcol
 
 debug = False
@@ -150,10 +150,11 @@ class StepFunction():
         return new_perms[-1], (circs, perms), score
 
 def permute_matrix(mat2_matrix, permuation):
-    perm_matrix = ...
+    perm_matrix = np.asarray(mat2_matrix.data)[permuation, :]
     return Mat2(perm_matrix)
 
-def reverse_traversal(mode, matrix, architecture=None, initial_permutation=None, max_iter=100, max_step_gap=None, **kwargs):
+def reverse_traversal(matrix, architecture=None, initial_permutation=None, max_iter=100, max_step_gap=None, **kwargs):
+    # max_step_gap is untested!
     best_count = None
     best_solution = None
     step = 0
@@ -167,38 +168,32 @@ def reverse_traversal(mode, matrix, architecture=None, initial_permutation=None,
         architecture = create_fully_connected_architecture(n_qubits)
     if initial_permutation is None:
         initial_permutation = np.arange(n_qubits)
-    final_permutation = initial_permutation.copy()
     reverse_matrix = matrix.inverse()
     while step < max_iter or step-best_step < max_step_gap:
         # Adjust the matrix to represent the initial qubit placement. i.e. swap the rows.
         perm_matrix = permute_matrix(matrix, initial_permutation)
 
         compiled_circuit = CNOT_tracker(n_qubits)
-        rank = gauss(mode, perm_matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
+        # TODO make reverse traversal work for GENETIC_STEINER_MODE
+        final_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
 
-        if mode == ROWCOL_MODE: # TODO make reverse traversal work for GENETIC_STEINER_MODE
-            final_permutation = rank
-
-        if best_count is None or best_count > compiled_circuit.gather_metrics["n_cnots"]:
-            best_count = compiled_circuit.gather_metrics["n_cnots"]
+        if best_count is None or best_count > compiled_circuit.gather_metrics()["n_cnots"]:
+            best_count = compiled_circuit.gather_metrics()["n_cnots"]
             best_circuit = CNOT_tracker(n_qubits)
             for gate in reversed(compiled_circuit.gates):
                 best_circuit.add_gate(gate)
             best_solution = best_circuit, initial_permutation, final_permutation
             best_step = step
-
-        if mode != ROWCOL_MODE:  # TODO make reverse traversal work for GENETIC_STEINER_MODE
-            break
         # Reverse traversal step
 
         # adjust the reverse matrix to represent the final_permutation as new initial qubit placement
         perm_matrix = permute_matrix(reverse_matrix, initial_permutation)
 
         compiled_circuit = CNOT_tracker(n_qubits)
-        initial_permutation = gauss(mode, perm_matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
+        initial_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, x=compiled_circuit, **kwargs)
 
-        if best_count is None or best_count > compiled_circuit.gather_metrics["n_cnots"]:
-            best_count = compiled_circuit.gather_metrics["n_cnots"]
+        if best_count is None or best_count > compiled_circuit.gather_metrics()["n_cnots"]:
+            best_count = compiled_circuit.gather_metrics()["n_cnots"]
             best_circuit = CNOT_tracker(n_qubits)
             for gate in reversed(compiled_circuit.gates):
                 best_circuit.add_gate(gate)
