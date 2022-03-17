@@ -32,8 +32,8 @@ from . import optimize
 from . import simplify
 from . import d3
 from . import utils
-from pyzx.routing import cnot_mapper
-from pyzx.routing import architecture
+from .routing import cnot_mapper
+from .routing import architecture
 from . import tikz
 
 if __name__ == '__main__':
