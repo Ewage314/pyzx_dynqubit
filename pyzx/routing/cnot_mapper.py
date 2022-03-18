@@ -25,13 +25,16 @@ debug = False
 GAUSS_MODE = "gauss"
 STEINER_MODE = "steiner"
 ROWCOL_MODE = "rowcol"
-GENETIC_STEINER_MODE = "genetic_steiner"
-GENETIC_GAUSS_MODE = "genetic_gauss"
+PERMROWCOL_MODE = "permrowcol"
+GENETIC_STEINER_MODE = "genetic_" + STEINER_MODE
+GENETIC_GAUSS_MODE = "genetic_" + GAUSS_MODE
+GENETIC_ROWCOL_MODE = "genetic_" + ROWCOL_MODE
+GENETIC_PERMROWCOL_MODE = "genetic_" + PERMROWCOL_MODE
 PSO_GAUSS_MODE = "pso_gauss"
 PSO_STEINER_MODE = "pso_steiner"
 
 elim_modes = [STEINER_MODE, ROWCOL_MODE, GAUSS_MODE, GENETIC_STEINER_MODE, GENETIC_GAUSS_MODE]
-genetic_elim_modes = [GENETIC_STEINER_MODE, GENETIC_GAUSS_MODE]
+genetic_elim_modes = [GENETIC_STEINER_MODE, GENETIC_GAUSS_MODE, GENETIC_ROWCOL_MODE, GENETIC_PERMROWCOL_MODE]
 pso_elim_modes = [PSO_GAUSS_MODE, PSO_STEINER_MODE]
 basic_elim_modes = [STEINER_MODE, GAUSS_MODE]
 elim_modes = genetic_elim_modes + pso_elim_modes + basic_elim_modes
@@ -255,11 +258,15 @@ def gauss(mode, matrix, architecture=None, permutation=None, try_transpose=False
                 "\033[91m Warning: Architecture is not given, assuming fully connected architecture of size matrix.shape[0]. \033[0m ")
             architecture = create_fully_connected_architecture(len(matrix.data))
         rank =  rowcol(matrix, architecture, permutation=permutation, **kwargs)
-    elif mode == GENETIC_STEINER_MODE:
-        perm, circuit, rank = permutated_gauss(matrix, STEINER_MODE, architecture=architecture, permutation=permutation, **kwargs)
-        #return rank
-    elif mode == GENETIC_GAUSS_MODE:
-        perm, circuit, rank = permutated_gauss(matrix, GAUSS_MODE, architecture=architecture, permutation=permutation, **kwargs)
+    elif mode == PERMROWCOL_MODE:
+        #raise NotImplementedError("Genetic PermRowCOl not yet implemented")
+        output_perm = permrowcol(matrix, architecture, **kwargs)
+        return None
+    elif mode in genetic_elim_modes:
+        if mode == GENETIC_PERMROWCOL_MODE:
+            kwargs["col"] = False
+        new_mode = mode[len("genetic_"):]
+        perm, circuit, rank = permutated_gauss(matrix, new_mode, architecture=architecture, permutation=permutation, **kwargs)
     if try_transpose:
         # TODO - fix x and y circuits... - Needed? 
         # TODO pick which gauss version was chosen
