@@ -26,7 +26,7 @@ class TestSteiner(unittest.TestCase):
 
     def setUp(self):
         self.n_tests = 100
-        self.arch = create_architecture(SQUARE, n_qubits=9) #Needs to have a square number of qubits to test the square architecture.
+        self.arch = create_architecture(SQUARE, n_qubits=16) #Needs to have a square number of qubits to test the square architecture.
         self.n_qubits = self.arch.n_qubits
         depth = 20
         self.circuit = [CNOT_tracker(self.arch.n_qubits) for _ in range(self.n_tests)]
@@ -203,9 +203,10 @@ class TestSteiner(unittest.TestCase):
                 self.do_permutated_gaus(self.matrix[i], perm, perm2)
 
     def test_permrowcol(self):
-        print("Original\tSteiner\tPermRowCol", "RowCol")
-        ng1, ng2, ng3, ng4 = 20,0,0, 0
-        d1, d2, d3, d4 = 0,0,0, 0
+        print("Testing PermRowCol")
+        #print("Original\tSteiner\tPermRowCol", "RowCol")
+        #ng1, ng2, ng3, ng4 = 20,0,0, 0
+        #d1, d2, d3, d4 = 0,0,0, 0
         for i in range(self.n_tests):
             with self.subTest(i=i):
                 architecture = self.arch
@@ -214,6 +215,7 @@ class TestSteiner(unittest.TestCase):
                 matrix = Mat2(array)
                 permutation = permrowcol(matrix, architecture, y=circuit)
                 undo_perm = self.reverse_permutation(permutation)
+                # Check if the resulting parity matrix is a permutation matrix with the given permutation.
                 self.assertNdArrEqual(np.asarray(matrix.data)[:, undo_perm], np.identity(len(matrix.data)))
                 """
                 print(i)
@@ -224,7 +226,10 @@ class TestSteiner(unittest.TestCase):
                 print(np.asarray(circuit.matrix.data)[:, permutation])
                 input("check")
                 """
+                # Check if the parity matrix of the generated circuit is equal to that of the original circuit.
                 self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, permutation], self.matrix[i].data)
+                """
+                # Gather some quick preliminary results - hack
                 ng3 += circuit.gather_metrics()["n_cnots"]
                 d3 += circuit.gather_metrics()["depth"]
                 c2, _, _ = self.do_gauss(STEINER_MODE, np.copy(self.matrix[i].data),architecture=architecture)
@@ -236,12 +241,13 @@ class TestSteiner(unittest.TestCase):
                 d1 += sum([self.circuit[i].gather_metrics()["depth"]])
         print(ng1, ng2/self.n_tests, ng3/self.n_tests, ng4/self.n_tests)
         print(d1/self.n_tests, d2/self.n_tests, d3/self.n_tests, d4/self.n_tests)
+        """
 
     def test_reverse_traversal(self):
         print("Skipping reverse traversal tests")
+        return
         for i in range(self.n_tests):
             with self.subTest(i=i):
-                return
                 architecture = self.arch
                 array = np.copy(self.matrix[i].data)
                 print("Test", i)

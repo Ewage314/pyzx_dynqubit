@@ -265,7 +265,7 @@ def rowcol(matrix, architecture, full_reduce=True, x=None, y=None, permutation=N
         rowcols_to_eliminate.remove(choice) # step 10
     return None
 
-def permrowcol(matrix, architecture, full_reduce=True, x=None, y=None, **kwargs):
+def permrowcol(matrix, architecture, full_reduce=True, x=None, y=None, chooseRow=None, chooseColumn=None, **kwargs):
 
     def row_add(c0, c1):
         matrix.row_add(c0, c1)
@@ -279,14 +279,22 @@ def permrowcol(matrix, architecture, full_reduce=True, x=None, y=None, **kwargs)
     rows_to_eliminate = [i for i in range(len(matrix.data))]
     output_permutation = [None]*len(matrix.data)
 
+    if chooseRow is None:
+        # Pick the row with the least ones.
+        chooseRow = lambda m, o: o[np.argmin([sum(m.data[i]) for i in o])]
+
+    if chooseColumn is None:
+        # Pick the column with a 1 in chosen_row and the least ones in the column
+        print("sfsadfsdfsdf")
+        chooseColumn = lambda m, r, o: o[np.argmin([sum(m.data[i]) if m.data[r][i] == 1 else len(m.data) for i in o])] 
+
+
     while len(rows_to_eliminate) > 1:
         # Pick a vertex to remove - Step 1
         options = [architecture.vertex2qubit(v) for v in architecture.non_cutting_vertices(rows_to_eliminate)]
-        # Pick the row with the least ones.
-        chosen_row = options[np.argmin([sum(matrix.data[i]) for i in options])]
+        chosen_row = chooseRow(matrix, options)
         # Pick target register for logical qubit choice on original register options[0].
-        # Pick the column with a 1 in chosen_row and the least ones in the column
-        chosen_column = cols_to_eliminate[np.argmin([sum(matrix.data[i]) if matrix.data[chosen_row][i] == 1 else architecture.n_qubits for i in cols_to_eliminate])] 
+        chosen_column = chooseColumn(matrix, chosen_row, cols_to_eliminate)
 
         debug and print("ROWCOL - ", chosen_row, chosen_column, rows_to_eliminate, cols_to_eliminate)
         debug and print(matrix)
