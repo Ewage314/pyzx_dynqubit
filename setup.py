@@ -8,7 +8,9 @@ setup(
     url="https://github.com/Quantomatic/pyzx.git",
     description="Python library for quantum circuit rewriting and optimisation using the ZX-calculus",
     packages=[
-        "pyzx"
+        "pyzx", 
+        "pyzx.graph",
+        "pyzx.routing"
     ],
     install_requires=[
         "numpy >= 1.14",
