@@ -16,7 +16,7 @@ from ..routing.cnot_mapper import STEINER_MODE, TKET_COMPILER, sequential_map_cn
 from ..routing.phase_poly import route_phase_poly, TKET_STEINER_MODE, make_random_phase_poly_approximate, make_random_phase_poly_from_gadgets, PhasePoly
 from ..utils import make_into_list, restricted_float
 from ..circuit import Circuit, ZPhase, CNOT
-from ..routing.tket_router import pyzx_to_tk, OpType, route_tket, tket_to_pyzx, Transform
+from ..routing.tket_router import OpType, route_tket, tket_to_pyzx, Transform ,pyzx_to_tk 
 from ..parity_maps import CNOT_tracker
 from pytket import circuit_from_qasm
 
