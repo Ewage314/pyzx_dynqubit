@@ -285,7 +285,6 @@ def permrowcol(matrix, architecture, full_reduce=True, x=None, y=None, chooseRow
 
     if chooseColumn is None:
         # Pick the column with a 1 in chosen_row and the least ones in the column
-        print("sfsadfsdfsdf")
         chooseColumn = lambda m, r, o: o[np.argmin([sum(m.data[i]) if m.data[r][i] == 1 else len(m.data) for i in o])] 
 
 
