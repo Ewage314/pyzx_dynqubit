@@ -1,6 +1,7 @@
 
 from calendar import c
 from tkinter.tix import ROW
+from turtle import undo
 import unittest
 import sys
 
@@ -204,9 +205,6 @@ class TestSteiner(unittest.TestCase):
 
     def test_permrowcol(self):
         print("Testing PermRowCol")
-        #print("Original\tSteiner\tPermRowCol", "RowCol")
-        #ng1, ng2, ng3, ng4 = 20,0,0, 0
-        #d1, d2, d3, d4 = 0,0,0, 0
         for i in range(self.n_tests):
             with self.subTest(i=i):
                 architecture = self.arch
@@ -216,49 +214,31 @@ class TestSteiner(unittest.TestCase):
                 permutation = permrowcol(matrix, architecture, y=circuit)
                 undo_perm = self.reverse_permutation(permutation)
                 # Check if the resulting parity matrix is a permutation matrix with the given permutation.
-                self.assertNdArrEqual(np.asarray(matrix.data)[:, undo_perm], np.identity(len(matrix.data)))
-                """
-                print(i)
-                print(np.array(self.matrix[i].data))
-                print(permutation)
-                print(np.asarray(circuit.matrix.data))
-                print(circuit.gates)
-                print(np.asarray(circuit.matrix.data)[:, permutation])
-                input("check")
-                """
+                self.assertNdArrEqual(np.asarray(matrix.data)[:, permutation], np.identity(len(matrix.data)))
                 # Check if the parity matrix of the generated circuit is equal to that of the original circuit.
-                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, permutation], self.matrix[i].data)
-                """
-                # Gather some quick preliminary results - hack
-                ng3 += circuit.gather_metrics()["n_cnots"]
-                d3 += circuit.gather_metrics()["depth"]
-                c2, _, _ = self.do_gauss(STEINER_MODE, np.copy(self.matrix[i].data),architecture=architecture)
-                ng2 += c2.gather_metrics()["n_cnots"]
-                d2 += c2.gather_metrics()["depth"]
-                c4, _, _ = self.do_gauss(ROWCOL_MODE, np.copy(self.matrix[i].data),architecture=architecture)
-                ng4 += c4.gather_metrics()["n_cnots"]
-                d4 += c4.gather_metrics()["depth"]
-                d1 += sum([self.circuit[i].gather_metrics()["depth"]])
-        print(ng1, ng2/self.n_tests, ng3/self.n_tests, ng4/self.n_tests)
-        print(d1/self.n_tests, d2/self.n_tests, d3/self.n_tests, d4/self.n_tests)
-        """
+                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, undo_perm], self.matrix[i].data)
 
     def test_reverse_traversal(self):
-        print("Skipping reverse traversal tests")
-        return
+        #print("Skipping reverse traversal")
+        #return
         for i in range(self.n_tests):
             with self.subTest(i=i):
                 architecture = self.arch
                 array = np.copy(self.matrix[i].data)
-                print("Test", i)
-                print(np.array(self.matrix[i].data))
-                circuit, initial_permutation, output_permutation = reverse_traversal(Mat2(array), architecture)
-                undo_perm = self.reverse_permutation(initial_permutation)
-                print(initial_permutation, output_permutation)
-                print(np.array(circuit.matrix.data))
-                print(np.asarray(circuit.matrix.data)[:, output_permutation][initial_permutation])
+                #print("Test", i)
+                #print(np.array(self.matrix[i].data))
+                circuit, initial_permutation, output_permutation = reverse_traversal(Mat2(array), architecture, max_iter=5)
+                undo_initial_perm = self.reverse_permutation(initial_permutation)
+                undo_output_perm = self.reverse_permutation(output_permutation) # TODO - figure out which of the initial permutation should be given back - then check which one is given back.
+                #print(initial_permutation, output_permutation)
+                #print(undo_initial_perm, undo_output_perm)
+                #print(np.array(circuit.matrix.data))
+                #print(np.asarray(circuit.matrix.data)[undo_initial_perm][:, undo_output_perm])
+                #print(np.asarray(circuit.matrix.data)[initial_permutation][:, undo_output_perm])
+                #print(np.asarray(circuit.matrix.data)[undo_initial_perm][:, output_permutation])
+                #print(np.asarray(circuit.matrix.data)[initial_permutation][:, output_permutation])
                 #input("next")
-                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, output_permutation][initial_permutation], self.matrix[i].data)
+                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[undo_initial_perm][:, undo_output_perm], self.matrix[i].data)
 
     def test_reverse_traversal_each_step(self):
         for i in range(self.n_tests):

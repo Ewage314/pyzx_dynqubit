@@ -152,12 +152,14 @@ class StepFunction():
         #new_perms[0] = perms[-1] 
         return new_perms[-1], (circs, perms), score
 
-def permute_matrix(mat2_matrix, permuation):
-    perm_matrix = np.asarray(mat2_matrix.data)[permuation, :]
+def permute_matrix(mat2_matrix, permuation, row=True):
+    if row:
+        perm_matrix = np.asarray(mat2_matrix.data)[permuation, :]
+    else: 
+        perm_matrix = np.asarray(mat2_matrix.data)[:, permuation]
     return Mat2(perm_matrix)
 
 def reverse_traversal(matrix, architecture=None, initial_permutation=None, max_iter=100, max_step_gap=None, **kwargs):
-    # max_step_gap is untested!
     best_count = None
     best_solution = None
     step = 0
@@ -165,6 +167,9 @@ def reverse_traversal(matrix, architecture=None, initial_permutation=None, max_i
     n_qubits = len(matrix.data)
     if max_step_gap is None:
         max_step_gap = max_iter
+    else: 
+        print(
+                "\033[91m Warning: The Max Step gap parameters is untested. \033[0m ")
     if architecture is None:
         print(
                 "\033[91m Warning: Architecture is not given, assuming fully connected architecture of size matrix.shape[0]. \033[0m ")
@@ -172,7 +177,7 @@ def reverse_traversal(matrix, architecture=None, initial_permutation=None, max_i
     if initial_permutation is None:
         initial_permutation = np.arange(n_qubits)
     reverse_matrix = matrix.inverse()
-    while step < max_iter or step-best_step < max_step_gap:
+    while step < max_iter and step-best_step < max_step_gap:
         # Adjust the matrix to represent the initial qubit placement. i.e. swap the rows.
         perm_matrix = permute_matrix(matrix, initial_permutation)
 
@@ -182,28 +187,32 @@ def reverse_traversal(matrix, architecture=None, initial_permutation=None, max_i
 
         if best_count is None or best_count > compiled_circuit.gather_metrics()["n_cnots"]:
             best_count = compiled_circuit.gather_metrics()["n_cnots"]
+            #print("gap:",step-best_step)
             best_circuit = CNOT_tracker(n_qubits)
-            for gate in reversed(compiled_circuit.gates):
+            for gate in compiled_circuit.gates:
                 best_circuit.add_gate(gate)
             best_solution = best_circuit, initial_permutation, final_permutation
             best_step = step
         # Reverse traversal step
 
         # adjust the reverse matrix to represent the final_permutation as new initial qubit placement
-        perm_matrix = permute_matrix(reverse_matrix, initial_permutation)
+        perm_matrix = permute_matrix(reverse_matrix, final_permutation)
 
         compiled_circuit = CNOT_tracker(n_qubits)
-        initial_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, x=compiled_circuit, **kwargs)
+        initial_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
 
         if best_count is None or best_count > compiled_circuit.gather_metrics()["n_cnots"]:
             best_count = compiled_circuit.gather_metrics()["n_cnots"]
+            #print("gap:",step-best_step +0.5)
             best_circuit = CNOT_tracker(n_qubits)
             for gate in reversed(compiled_circuit.gates):
                 best_circuit.add_gate(gate)
             best_solution = best_circuit, initial_permutation, final_permutation
-            best_step = step
-        
+            best_step = step + .5
+
+
         step += 1
+    #print(max_iter, step, best_step)
     return best_solution
 
 def gauss(mode, matrix, architecture=None, permutation=None, try_transpose=False, **kwargs):
