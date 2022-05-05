@@ -343,12 +343,12 @@ def permrowcol(matrix, architecture, full_reduce=True, x=None, y=None, chooseRow
         while edge is not None: #Step 9
             row_add(edge[1], edge[0])
             edge = next(steiner_tree)
-        output_permutation[chosen_column] = chosen_row
+        output_permutation[chosen_row] = chosen_column
         rows_to_eliminate.remove(chosen_row) # step 10
         cols_to_eliminate.remove(chosen_column)
     chosen_row = rows_to_eliminate[0]
     chosen_column = cols_to_eliminate[0]
-    output_permutation[chosen_column] = chosen_row
+    output_permutation[chosen_row] = chosen_column
     if matrix.data[chosen_row][chosen_column] != 1:
         print("This should not happen")
     debug and print("FINAL MATRIX\n", matrix)
