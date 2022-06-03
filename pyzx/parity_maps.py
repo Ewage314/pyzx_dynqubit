@@ -24,12 +24,13 @@ from pyzx.linalg import Mat2
 import numpy as np
 
 class CNOT_tracker(Circuit):
-    def __init__(self, n_qubits, **kwargs):
+    def __init__(self, n_qubits, parities_as_columns=False, **kwargs):
         super().__init__(n_qubits, **kwargs)
-        self.matrix = Mat2(np.identity(n_qubits, dtype=np.int32).tolist())
+        self.matrix = Mat2(np.identity(n_qubits, dtype=np.int32))
         self.row_perm = np.arange(n_qubits)
         self.col_perm = np.arange(n_qubits)
         self.n_qubits = n_qubits
+        self.parities_as_columns = parities_as_columns
 
     def count_cnots(self):
         return len([g for g in self.gates if hasattr(g, "name") and g.name in ["CNOT", "CZ"]])
@@ -47,19 +48,26 @@ class CNOT_tracker(Circuit):
                     previous_gates += [g.control, g.target]
         return depth
 
-    def row_add(self, q0, q1):
-        self.add_gate("CNOT", q0, q1)
-        self.matrix.row_add(q0, q1)
+    def row_add(self, q0, q1): #We want to add q0 to q1 
+        if self.parities_as_columns: # rowadd(target, control)
+            self.add_gate("CNOT", q1, q0)
+        else: # rowadd(control, target)
+            self.prepend_gate("CNOT", q0, q1)
 
     def add_gate(self, gate, *args, **kwargs):
-        if isinstance(gate, CNOT):
-            self.row_add(gate.control, gate.target)
-        else:
-            super().add_gate(gate, *args, **kwargs)
+        # Do the other gate adding things.
+        super().add_gate(gate, *args, **kwargs)
+        # Update the parity matrix.
+        self.update_matrix()
 
-    def col_add(self, q0, q1):
-        self.prepend_gate("CNOT", q1, q0)
-        self.matrix.col_add(q0, q1)
+    """
+    # A col_add is a row addition on the transpose of the matrix, which is the same as not self.parities_as_columns.
+    def col_add(self, q1, q0):
+        if not self.parities_as_columns:
+            self.add_gate("CNOT", q1, q0)
+        else:
+            self.prepend_gate("CNOT", q0, q1)
+            """
 
     @staticmethod
     def get_metric_names():
@@ -85,6 +93,7 @@ class CNOT_tracker(Circuit):
             gate_class = gate_types[gate]
             gate = gate_class(*args, **kwargs)
         self.gates.insert(0, gate)
+        self.update_matrix()
 
     def to_qasm(self):
         qasm = super().to_qasm()
@@ -93,9 +102,9 @@ class CNOT_tracker(Circuit):
         return '\n'.join([initial_perm, end_perm, qasm])
 
     @staticmethod
-    def from_circuit(circuit):
-        new_circuit = CNOT_tracker(circuit.qubits, name=circuit.name)
-        new_circuit.gates = circuit.gates
+    def from_circuit(circuit, parities_as_columns=False ):
+        new_circuit = CNOT_tracker(circuit.qubits, name=circuit.name, parities_as_columns=parities_as_columns)
+        new_circuit.gates = [g for g in circuit.gates]
         new_circuit.update_matrix()
         return new_circuit
 
@@ -103,22 +112,29 @@ class CNOT_tracker(Circuit):
         self.matrix = Mat2(np.identity(self.n_qubits))
         for gate in self.gates:
             if hasattr(gate, "name") and gate.name == "CNOT":
-                self.matrix.row_add(gate.control, gate.target)
+                if self.parities_as_columns:
+                    self.matrix.col_add(gate.control, gate.target)
+                else:
+                    self.matrix.row_add(gate.control, gate.target)
             else:
                 print("Warning: CNOT tracker can only be used for circuits with only CNOT gates!")
 
     @staticmethod
-    def from_qasm_file(fname):
+    def from_qasm_file(fname, parities_as_columns=False):
         circuit = Circuit.from_qasm_file(fname)
-        return CNOT_tracker.from_circuit(circuit)
+        return CNOT_tracker.from_circuit(circuit, parities_as_columns=parities_as_columns)
 
-def build_random_parity_map(qubits, n_cnots, circuit=None):
+    def copy(self):
+        return CNOT_tracker.from_circuit(self, parities_as_columns=self.parities_as_columns)
+
+def build_random_parity_map(qubits, n_cnots, circuit=None, parities_as_columns=False):
     """
     Builds a random parity map.
 
     :param qubits: The number of qubits that participate in the parity map
     :param n_cnots: The number of CNOTs in the parity map
     :param circuit: A (list of) circuit object(s) that implements a row_add() method to add the generated CNOT gates [optional]
+    :param parities_as_columns: Whether the parities are columns in the map, alternatively they are rows [optional, default=False]
     :return: a 2D numpy array that represents the parity map.
     """
     if circuit is None:
@@ -128,8 +144,11 @@ def build_random_parity_map(qubits, n_cnots, circuit=None):
     g = generate_cnots(qubits=qubits, depth=n_cnots)
     c = Circuit.from_graph(g)
     matrix = Mat2(np.identity(qubits))
+
     for gate in c.gates:
         matrix.row_add(gate.control, gate.target)
         for c in circuit:
-            c.row_add(gate.control, gate.target)
+            c.add_gate(gate)
+    if parities_as_columns:
+        matrix = matrix.transpose()
     return matrix.data

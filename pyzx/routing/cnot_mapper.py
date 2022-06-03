@@ -17,7 +17,7 @@ from ..machine_learning import GeneticAlgorithm, ParticleSwarmOptimization
 from ..utils import make_into_list
 #from .steiner import steiner_gauss
 from .steiner import permrowcol, rec_steiner_gauss as steiner_gauss
-from .steiner import rowcol
+from .steiner import rowcol, A_permrowcol
 
 debug = False
 
@@ -82,7 +82,7 @@ def basic_fitness_func(metric_func, mode, matrix, architecture, row=True, col=Tr
     #    col_perm = permutation if col else np.arange(len(matrix.data[0]))
     #    circuit = CNOT_tracker(n_qubits)
     #    mat = Mat2([[matrix.data[r][c] for c in col_perm] for r in row_perm])
-    #    gauss(mode, mat, architecture=architecture, y=circuit, full_reduce=full_reduce, **kwargs)
+    #    gauss(mode, mat, architecture=architecture, circuit=circuit, full_reduce=full_reduce, **kwargs)
     #    return metric_func(circuit)
     fitness_func = FitnessFunction(metric_func, matrix, mode, architecture, row=row, col=col, full_reduce=full_reduce, **kwargs)
     return fitness_func
@@ -113,7 +113,7 @@ class FitnessFunction(object):
             col_perm = permutation if self.col else np.arange(len(self.matrix.data[0]))
             circuit = CNOT_tracker(self.n_qubits)
             mat = Mat2([[self.matrix.data[r][c] for c in col_perm] for r in row_perm])
-            gauss(self.mode, mat, architecture=self.architecture, y=circuit, full_reduce=self.full_reduce, **self.kwargs)
+            gauss(self.mode, mat, architecture=self.architecture, circuit=circuit, full_reduce=self.full_reduce, **self.kwargs)
             return f(circuit)
         return fitness_func
 
@@ -159,7 +159,7 @@ def permute_matrix(mat2_matrix, permuation, row=True):
         perm_matrix = np.asarray(mat2_matrix.data)[:, permuation]
     return Mat2(perm_matrix)
 
-def reverse_traversal(matrix, architecture=None, initial_permutation=None, max_iter=100, max_step_gap=None, **kwargs):
+def reverse_traversal(matrix, architecture=None, max_iter=100, max_step_gap=None, initial_permutation=None, **kwargs):
     best_count = None
     best_solution = None
     step = 0
@@ -183,7 +183,7 @@ def reverse_traversal(matrix, architecture=None, initial_permutation=None, max_i
 
         compiled_circuit = CNOT_tracker(n_qubits)
         # TODO make reverse traversal work for GENETIC_STEINER_MODE
-        final_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
+        final_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, circuit=compiled_circuit, **kwargs)
 
         if best_count is None or best_count > compiled_circuit.gather_metrics()["n_cnots"]:
             best_count = compiled_circuit.gather_metrics()["n_cnots"]
@@ -199,7 +199,7 @@ def reverse_traversal(matrix, architecture=None, initial_permutation=None, max_i
         perm_matrix = permute_matrix(reverse_matrix, final_permutation)
 
         compiled_circuit = CNOT_tracker(n_qubits)
-        initial_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
+        initial_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, circuit=compiled_circuit, **kwargs)
 
         if best_count is None or best_count > compiled_circuit.gather_metrics()["n_cnots"]:
             best_count = compiled_circuit.gather_metrics()["n_cnots"]
@@ -215,7 +215,15 @@ def reverse_traversal(matrix, architecture=None, initial_permutation=None, max_i
     #print(max_iter, step, best_step)
     return best_solution
 
-def gauss(mode, matrix, architecture=None, permutation=None, try_transpose=False, **kwargs):
+def gauss_return_circuit(mode, matrix, architecture, parities_as_columns=False, **kwargs):
+    circuit = CNOT_tracker(architecture.n_qubits, parities_as_columns)
+    gauss(mode, matrix, architecture, circuit=circuit, **kwargs)
+    return circuit
+
+def gauss_return_cnot_count(mode, matrix, architecture, parities_as_columns=False, **kwargs):
+    return gauss_return_circuit(mode, matrix, architecture, parities_as_columns, **kwargs).count_cnots()
+
+def gauss(mode, matrix, architecture=None, permutation=None, circuit=None, **kwargs):
     """
     Performs gaussian elimination of type mode on Mat2 matrix on the given architecture, if needed.
 
@@ -225,17 +233,13 @@ def gauss(mode, matrix, architecture=None, permutation=None, try_transpose=False
     :param kwargs: Other arguments that can be given to the Mat2.gauss() function or parameters for the genetic algorithm.
     :return: The rank of the matrix. Mat2 matrix is transformed.
     """
-    if try_transpose:
-        matrix = matrix.transpose()
-        architecture = architecture.transpose()
 
     if mode == GAUSS_MODE:
         # TODO - adjust to get the right gate locations for the given permutation.
         
         if permutation is not None:
-            #print("\033[91m Warning: Permutation parameter with Gauss-Jordan elimination is not yet supported, it can be optimized with permutated_gauss(). \033[0m ")
-            #return matrix.gauss(**kwargs)
-            # Broken code that tries to implement this.
+            raise NotImplementedError(" Permutation parameter with Gauss-Jordan elimination is not yet supported, it can be optimized with permutated_gauss()")
+            # OLD Broken code that tries to implement this.
             matrix = Mat2([[row[i] for i in permutation] for row in matrix.data])
             old_x, old_y = None, None
             if "x" in kwargs:
@@ -254,36 +258,34 @@ def gauss(mode, matrix, architecture=None, permutation=None, try_transpose=False
             #    if old_y != None: old_y.col_add(t, c)
             #return rank
         else:
+            if circuit:
+                kwargs["x"] = circuit
             rank = matrix.gauss(**kwargs)
     elif mode == STEINER_MODE:
         if architecture is None:
             print(
                 "\033[91m Warning: Architecture is not given, assuming fully connected architecture of size matrix.shape[0]. \033[0m ")
             architecture = create_fully_connected_architecture(len(matrix.data))
-        rank =  steiner_gauss(matrix, architecture, permutation=permutation, **kwargs)
+        rank =  steiner_gauss(matrix, architecture, permutation=permutation, circuit=circuit, **kwargs)
     elif mode == ROWCOL_MODE:
         if architecture is None:
             print(
                 "\033[91m Warning: Architecture is not given, assuming fully connected architecture of size matrix.shape[0]. \033[0m ")
             architecture = create_fully_connected_architecture(len(matrix.data))
-        rank =  rowcol(matrix, architecture, permutation=permutation, **kwargs)
+        rank =  rowcol(matrix, architecture, permutation=permutation, circuit=circuit, **kwargs)
     elif mode == PERMROWCOL_MODE:
         #raise NotImplementedError("Genetic PermRowCOl not yet implemented")
-        output_perm = permrowcol(matrix, architecture, **kwargs)
+        output_perm = permrowcol(matrix, architecture, circuit=circuit, **kwargs)
         return None
     elif mode in genetic_elim_modes:
         if mode == GENETIC_PERMROWCOL_MODE:
             kwargs["col"] = False
         new_mode = mode[len("genetic_"):]
-        perm, circuit, rank = permutated_gauss(matrix, new_mode, architecture=architecture, permutation=permutation, **kwargs)
-    if try_transpose:
-        # TODO - fix x and y circuits... - Needed? 
-        # TODO pick which gauss version was chosen
-        pass
+        perm, circuit, rank = permutated_gauss(matrix, new_mode, architecture=architecture, permutation=permutation, circuit=circuit, **kwargs)
     return rank
 
 def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, crossover_prob=0.8, mutate_prob=0.2, n_iterations=5,
-                     row=True, col=True, full_reduce=True, fitness_func=None, x=None, y=None, n_threads=None, **kwargs):
+                     row=True, col=True, full_reduce=True, fitness_func=None, circuit=None, n_threads=None, **kwargs):
     """
     Finds an optimal permutation of the matrix to reduce the number of CNOT gates.
     
@@ -309,14 +311,14 @@ def permutated_gauss(matrix, mode=None, architecture=None, population_size=30, c
     n_qubits=len(matrix.data)
     row_perm = best_permutation if row else np.arange(len(matrix.data))
     col_perm = best_permutation if col else np.arange(len(matrix.data[0]))
-    if y is None:
+    if circuit is None:
         circuit = CNOT_tracker(n_qubits)
     else:
-        circuit = y
+        circuit = circuit
     mat = Mat2([[matrix.data[r][c] for c in col_perm] for r in row_perm])
     circuit.row_perm = row_perm
     circuit.col_perm = col_perm
-    rank = gauss(mode, mat, architecture, x=x, y=circuit, full_reduce=full_reduce, **kwargs)
+    rank = gauss(mode, mat, architecture, circuit=circuit, full_reduce=full_reduce, **kwargs)
     return best_permutation, circuit, rank
 
 def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, input_perm=True, output_perm=True, 
@@ -329,7 +331,7 @@ def sequential_gauss(matrices, mode=None, architecture=None, fitness_func=None, 
         circuits = [CNOT_tracker(n_qubits) for _ in matrices]
         permutations = [np.arange(n_qubits) for _ in range(len(matrices)+1)]
         for i, m in enumerate(matrices):
-            gauss(mode, m, architecture=architecture, y=circuits[i], **kwargs)
+            gauss(mode, m, architecture=architecture, circuit=circuits[i], **kwargs)
     elif mode in genetic_elim_modes:
         col = input_perm
         if mode == GENETIC_GAUSS_MODE:
@@ -382,7 +384,7 @@ def count_cnots_mat2(mode, matrix, compile_mode=None, architecture=None, n_compi
     else:
         circuit = CNOT_tracker(matrix.data.shape[0])
     mat = Mat2(np.copy(matrix.data))
-    gauss(mode, mat, architecture=architecture, y=circuit, **kwargs)
+    gauss(mode, mat, architecture=architecture, circuit=circuit, **kwargs)
     return count_cnots_circuit(compile_mode, circuit, n_compile, store_circuit_as)
 
 def count_cnots_circuit(mode, circuit, n_compile=1, store_circuit_as=None):
@@ -532,9 +534,9 @@ def map_cnot_circuit(file, architecture, mode=GENETIC_STEINER_MODE, dest_file=No
     matrix = circuit.matrix
     compiled_circuit = CNOT_tracker(circuit.n_qubits)
     if mode in basic_elim_modes:
-        rank = gauss(mode, matrix, architecture, full_reduce=True, y=compiled_circuit, **kwargs)
+        rank = gauss(mode, matrix, architecture, full_reduce=True, circuit=compiled_circuit, **kwargs)
     elif mode in genetic_elim_modes:
-        rank = gauss(mode, matrix, architecture, full_reduce=True, y=compiled_circuit,
+        rank = gauss(mode, matrix, architecture, full_reduce=True, circuit=compiled_circuit,
                      population_size=population, crossover_prob=crossover_prob, mutate_prob=mutation_prob,
                      n_iterations=iterations, **kwargs)
     elif mode == QUIL_COMPILER:

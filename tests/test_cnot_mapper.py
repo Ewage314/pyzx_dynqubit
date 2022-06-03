@@ -18,7 +18,7 @@ from pyzx.parity_maps import CNOT_tracker, build_random_parity_map
 from pyzx.machine_learning import GeneticAlgorithm
 from pyzx.circuit import CNOT
 from pyzx.extract import permutation_as_swaps
-from pyzx.routing.steiner import permrowcol
+from pyzx.routing.steiner import permrowcol, A_permrowcol
 
 SEED = 42
 SKIP_LONG_TESTS = True
@@ -26,14 +26,15 @@ SKIP_LONG_TESTS = True
 class TestSteiner(unittest.TestCase):
 
     def setUp(self):
-        self.n_tests = 100
+        self.n_tests = 10
         self.arch = create_architecture(SQUARE, n_qubits=16) #Needs to have a square number of qubits to test the square architecture.
         self.n_qubits = self.arch.n_qubits
         depth = 20
-        self.circuit = [CNOT_tracker(self.arch.n_qubits) for _ in range(self.n_tests)]
+        self.parities_as_columns = True
+        self.circuit = [CNOT_tracker(self.arch.n_qubits, parities_as_columns=self.parities_as_columns) for _ in range(self.n_tests)]
         np.random.seed(SEED)
-        self.matrix = [build_random_parity_map(self.n_qubits, depth, self.circuit[i]) for i in range(self.n_tests)]
-        self.aggr_circ = CNOT_tracker(self.arch.n_qubits)
+        self.matrix = [build_random_parity_map(self.n_qubits, depth, self.circuit[i], parities_as_columns=self.parities_as_columns) for i in range(self.n_tests)]
+        self.aggr_circ = CNOT_tracker(self.arch.n_qubits, parities_as_columns=self.parities_as_columns)
         for c in self.circuit:
             for g in c.gates:
                 self.aggr_circ.add_gate(g)
@@ -123,6 +124,7 @@ class TestSteiner(unittest.TestCase):
                     architecture = create_architecture(name)
                 else:
                     architecture = create_architecture(name)
+                return # The code below will be tested during STEINER_MODE tests.
                 architecture.visualize(name+".png")
                 if self.n_qubits == architecture.n_qubits:
                     with self.subTest(i=i, arch=architecture.name):
@@ -140,10 +142,10 @@ class TestSteiner(unittest.TestCase):
     def do_gauss(self, mode, array, full_reduce=True, with_assert=True, architecture=None):
         if architecture is None:
             architecture = self.arch
-        circuit = CNOT_tracker(self.arch.n_qubits)
+        circuit = CNOT_tracker(self.arch.n_qubits, parities_as_columns=self.parities_as_columns)
         matrix = Mat2(np.copy(array))
-        rank = gauss(mode, matrix, architecture=architecture, full_reduce=full_reduce, y=circuit)
-        with_assert and mode == STEINER_MODE and self.assertGates(circuit, architecture)
+        rank = gauss(mode, matrix, architecture=architecture, full_reduce=full_reduce, circuit=circuit)
+        with_assert and mode != GAUSS_MODE and self.assertGates(circuit, architecture)
         with_assert and full_reduce and self.assertCircuitEquivalentNdArr(circuit, array)
         return circuit, matrix, rank
 
@@ -158,11 +160,12 @@ class TestSteiner(unittest.TestCase):
                     ranks = []
                     circuits = []
                     for mode in modes[full_reduce]:
-                        circuit, matrix, rank = self.do_gauss(mode, self.matrix[i], full_reduce=full_reduce, with_assert=True)
-                        circuits.append(circuit)
-                        ranks.append(rank)
-                        matrices.append(matrix.data)
-                        full_reduce and self.assertCircuitEquivalent(circuit, self.circuit[i])
+                        with self.subTest(mode=mode):
+                            circuit, matrix, rank = self.do_gauss(mode, self.matrix[i], full_reduce=full_reduce, with_assert=True)
+                            circuits.append(circuit)
+                            ranks.append(rank)
+                            matrices.append(matrix.data)
+                            full_reduce and self.assertCircuitEquivalent(circuit, self.circuit[i])
                     #self.assertEqual(*ranks)
                     if full_reduce:
                         self.list_to_2params_call(matrices, self.assertMat2Equal)
@@ -208,25 +211,40 @@ class TestSteiner(unittest.TestCase):
         for i in range(self.n_tests):
             with self.subTest(i=i):
                 architecture = self.arch
-                array = np.copy(self.matrix[i].data)
+                array = np.copy(self.matrix[i])
                 circuit = CNOT_tracker(self.arch.n_qubits)
                 matrix = Mat2(array)
-                permutation = permrowcol(matrix, architecture, y=circuit)
+                permutation = permrowcol(matrix, architecture, circuit=circuit)
+                #print("Target matrix")
+                #print(self.matrix[i])
+                #print("actual matrix")
+                #print(circuit.matrix)
+                #print("Permutation", permutation)
+                #input("Check")
                 undo_perm = self.reverse_permutation(permutation)
                 # Check if the resulting parity matrix is a permutation matrix with the given permutation.
                 self.assertNdArrEqual(np.asarray(matrix.data)[:, permutation], np.identity(len(matrix.data)))
                 # Check if the parity matrix of the generated circuit is equal to that of the original circuit.
-                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, undo_perm], self.matrix[i].data)
+                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, undo_perm], self.matrix[i])
+
+    def test_Apermrowcol(self):
+        print("Testing A* PermRowCol")
+        for i in range(self.n_tests):
+            with self.subTest(i=i):
+                permutation, circuit = A_permrowcol(Mat2(np.copy(self.matrix[i])), self.arch, choiceWidth=2, parities_as_columns=self.parities_as_columns)
+                undo_perm = self.reverse_permutation(permutation)
+                
+                # Check if the parity matrix of the generated circuit is equal to that of the original circuit.
+                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, undo_perm], self.matrix[i])
+
 
     def test_reverse_traversal(self):
-        #print("Skipping reverse traversal")
-        #return
         for i in range(self.n_tests):
             with self.subTest(i=i):
                 architecture = self.arch
-                array = np.copy(self.matrix[i].data)
+                array = np.copy(self.matrix[i])
                 #print("Test", i)
-                #print(np.array(self.matrix[i].data))
+                #print(np.array(self.matrix[i]))
                 circuit, initial_permutation, output_permutation = reverse_traversal(Mat2(array), architecture, max_iter=5)
                 undo_initial_perm = self.reverse_permutation(initial_permutation)
                 undo_output_perm = self.reverse_permutation(output_permutation) # TODO - figure out which of the initial permutation should be given back - then check which one is given back.
@@ -238,7 +256,7 @@ class TestSteiner(unittest.TestCase):
                 #print(np.asarray(circuit.matrix.data)[undo_initial_perm][:, output_permutation])
                 #print(np.asarray(circuit.matrix.data)[initial_permutation][:, output_permutation])
                 #input("next")
-                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[undo_initial_perm][:, undo_output_perm], self.matrix[i].data)
+                self.assertNdArrEqual(np.asarray(circuit.matrix.data)[undo_initial_perm][:, undo_output_perm], self.matrix[i])
 
     def test_reverse_traversal_each_step(self):
         for i in range(self.n_tests):
@@ -284,13 +302,14 @@ class TestSteiner(unittest.TestCase):
             return
         for i in range(1): # Takes too long otherwise
             with self.subTest(i=i):
-                population = 50
-                crossover_prob = 0.8
-                mutate_prob = 0.2
-                n_iter = 100
-                optimizer = GeneticAlgorithm(population, crossover_prob, mutate_prob, cnot_fitness_func(STEINER_MODE, Mat2(self.matrix[i]), self.arch))
-                best_permutation = optimizer.find_optimimum(self.n_qubits, n_iter)
-                self.do_permutated_gaus(self.matrix[i], best_permutation, best_permutation)
+                for mode in [STEINER_MODE, ROWCOL_MODE]:
+                    population = 50
+                    crossover_prob = 0.8
+                    mutate_prob = 0.2
+                    n_iter = 100
+                    optimizer = GeneticAlgorithm(population, crossover_prob, mutate_prob, cnot_fitness_func(mode, Mat2(self.matrix[i]), self.arch))
+                    best_permutation = optimizer.find_optimimum(self.n_qubits, n_iter)
+                    self.do_permutated_gaus(self.matrix[i], best_permutation, best_permutation, mode=mode)
 
     def test_pso_optimization(self):
         if SKIP_LONG_TESTS: 

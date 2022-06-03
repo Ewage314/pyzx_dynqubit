@@ -515,7 +515,7 @@ class Architecture():
         vs = {start} # Start with the root
         n_edges = len(edges)
         yielded_edges = set()
-        while len(yielded_edges) < n_edges:
+        while len(yielded_edges) < n_edges: # BFS top down.
             es = [e for e in edges for v in vs if e[0] == v] # Find all vertices connected to previously yielded vertices
             old_vs = [v for v in vs]
             for edge in es: # yield the corresponding edges.
