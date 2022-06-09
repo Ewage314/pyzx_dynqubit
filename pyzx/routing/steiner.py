@@ -416,7 +416,7 @@ def A_permrowcol(original_matrix, architecture, choiceWidth=None, max_size=None,
     while not q.empty():
         m, rows, cols, perm, c, path = q.get().item
         options = [architecture.vertex2qubit(v) for v in architecture.non_cutting_vertices(rows)]
-        rowColOptions = [(x[0], x[2]) for x in sorted([ (r,sum(m.data[r]),c,sum(m.data[:, c])) if m.data[r][c] == 1 else (r,sum(m.data[r]),c,len(m.data)) for r in options for c in cols], key=lambda v: v[1]*n_qubits+v[3])] # Sorted from smallest to largest
+        rowColOptions = [(x[0], x[2]) for x in sorted([ (r,sum(m.data[r]),c,sum(m.data[:, c])) if m.data[r][c] == 1 else (r,sum(m.data[r]),c,n_qubits) for r in options for c in cols], key=lambda v: v[1]*n_qubits+v[3])] # Sorted from smallest to largest
 
         if choiceWidth is not None and len(rowColOptions) > choiceWidth:
             rowColOptions = rowColOptions[:choiceWidth]

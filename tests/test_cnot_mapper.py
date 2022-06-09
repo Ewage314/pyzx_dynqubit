@@ -21,7 +21,7 @@ from pyzx.extract import permutation_as_swaps
 from pyzx.routing.steiner import permrowcol, A_permrowcol
 
 SEED = 42
-SKIP_LONG_TESTS = True
+SKIP_LONG_TESTS = False
 
 class TestSteiner(unittest.TestCase):
 
@@ -188,6 +188,7 @@ class TestSteiner(unittest.TestCase):
     def do_permutated_gaus(self, array, perm1, perm2, mode=STEINER_MODE, full_reduce=True, with_assert=True):
         with_assert and self.assertIsPerm(perm1)
         with_assert and self.assertIsPerm(perm2)
+        array=np.asarray(array)
         reordered_array = array[perm1][:, perm2]
         undo_perm1 = self.reverse_permutation(perm1)
         undo_perm2 = self.reverse_permutation(perm2)
@@ -207,7 +208,7 @@ class TestSteiner(unittest.TestCase):
                 self.do_permutated_gaus(self.matrix[i], perm, perm2)
 
     def test_permrowcol(self):
-        print("Testing PermRowCol")
+        #print("Testing PermRowCol")
         for i in range(self.n_tests):
             with self.subTest(i=i):
                 architecture = self.arch
@@ -228,7 +229,7 @@ class TestSteiner(unittest.TestCase):
                 self.assertNdArrEqual(np.asarray(circuit.matrix.data)[:, undo_perm], self.matrix[i])
 
     def test_Apermrowcol(self):
-        print("Testing A* PermRowCol")
+        #print("Testing A* PermRowCol")
         for i in range(self.n_tests):
             with self.subTest(i=i):
                 permutation, circuit = A_permrowcol(Mat2(np.copy(self.matrix[i])), self.arch, choiceWidth=2, parities_as_columns=self.parities_as_columns)
@@ -299,6 +300,7 @@ class TestSteiner(unittest.TestCase):
 
     def test_genetic_optimization(self):
         if SKIP_LONG_TESTS: 
+            print("Skipping genetic optimization text")
             return
         for i in range(1): # Takes too long otherwise
             with self.subTest(i=i):
@@ -312,6 +314,8 @@ class TestSteiner(unittest.TestCase):
                     self.do_permutated_gaus(self.matrix[i], best_permutation, best_permutation, mode=mode)
 
     def test_pso_optimization(self):
+        print("Skipping pso optimization test")
+        return
         if SKIP_LONG_TESTS: 
             return
         modes = [STEINER_MODE, GENETIC_STEINER_MODE]#, PSO_STEINER_MODE]

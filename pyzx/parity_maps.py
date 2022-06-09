@@ -60,14 +60,14 @@ class CNOT_tracker(Circuit):
         # Update the parity matrix.
         self.update_matrix()
 
-    """
+    
     # A col_add is a row addition on the transpose of the matrix, which is the same as not self.parities_as_columns.
     def col_add(self, q1, q0):
         if not self.parities_as_columns:
             self.add_gate("CNOT", q1, q0)
         else:
             self.prepend_gate("CNOT", q0, q1)
-            """
+            
 
     @staticmethod
     def get_metric_names():

@@ -159,7 +159,8 @@ def permute_matrix(mat2_matrix, permuation, row=True):
         perm_matrix = np.asarray(mat2_matrix.data)[:, permuation]
     return Mat2(perm_matrix)
 
-def reverse_traversal(matrix, architecture=None, max_iter=100, max_step_gap=None, initial_permutation=None, **kwargs):
+def reverse_traversal(matrix, architecture=None, max_iter=100, Astar=None, max_step_gap=None, initial_permutation=None, **kwargs):
+    #print(max_iter, Astar)
     best_count = None
     best_solution = None
     step = 0
@@ -181,9 +182,13 @@ def reverse_traversal(matrix, architecture=None, max_iter=100, max_step_gap=None
         # Adjust the matrix to represent the initial qubit placement. i.e. swap the rows.
         perm_matrix = permute_matrix(matrix, initial_permutation)
 
-        compiled_circuit = CNOT_tracker(n_qubits)
         # TODO make reverse traversal work for GENETIC_STEINER_MODE
-        final_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, circuit=compiled_circuit, **kwargs)
+        if Astar is not None:
+            #print("Astar reverse traversal")
+            final_permutation, compiled_circuit = A_permrowcol(perm_matrix, architecture, **Astar)
+        else:
+            compiled_circuit = CNOT_tracker(n_qubits)
+            final_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, circuit=compiled_circuit, **kwargs)
 
         if best_count is None or best_count > compiled_circuit.gather_metrics()["n_cnots"]:
             best_count = compiled_circuit.gather_metrics()["n_cnots"]
@@ -198,8 +203,12 @@ def reverse_traversal(matrix, architecture=None, max_iter=100, max_step_gap=None
         # adjust the reverse matrix to represent the final_permutation as new initial qubit placement
         perm_matrix = permute_matrix(reverse_matrix, final_permutation)
 
-        compiled_circuit = CNOT_tracker(n_qubits)
-        initial_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, circuit=compiled_circuit, **kwargs)
+        if Astar is not None:
+            #print("Astar reverse traversal")
+            final_permutation, compiled_circuit = A_permrowcol(perm_matrix, architecture, **Astar)
+        else:
+            compiled_circuit = CNOT_tracker(n_qubits)
+            initial_permutation = permrowcol(perm_matrix, architecture, full_reduce=True, circuit=compiled_circuit, **kwargs)
 
         if best_count is None or best_count > compiled_circuit.gather_metrics()["n_cnots"]:
             best_count = compiled_circuit.gather_metrics()["n_cnots"]
