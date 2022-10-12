@@ -42,7 +42,7 @@ class CNOT_tracker(Circuit):
             if hasattr(g, "name") and g.name in ["CNOT", "CZ"]:
                 if g.control in previous_gates or g.target in previous_gates: # Overlapping gate
                     # Start a new CNOT layer
-                    previous_gates = [] 
+                    previous_gates = [g.control, g.target] 
                     depth += 1
                 else:
                     previous_gates += [g.control, g.target]
