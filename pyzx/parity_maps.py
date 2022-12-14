@@ -26,7 +26,7 @@ import numpy as np
 class CNOT_tracker(Circuit):
     def __init__(self, n_qubits, parities_as_columns=False, **kwargs):
         super().__init__(n_qubits, **kwargs)
-        self.matrix = Mat2(np.identity(n_qubits, dtype=np.int32))
+        self.matrix = Mat2.id(n_qubits)
         self.row_perm = np.arange(n_qubits)
         self.col_perm = np.arange(n_qubits)
         self.n_qubits = n_qubits

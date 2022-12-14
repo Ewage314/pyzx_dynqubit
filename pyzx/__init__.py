@@ -22,6 +22,7 @@ from .simplify import *
 from .io import *
 from .tensor import *
 from .circuit import Circuit
+from .combs.combs import *
 from . import quantomatic
 from . import generate
 from . import todd

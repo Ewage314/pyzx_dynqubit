@@ -183,8 +183,8 @@ def draw(g, layout=None, labels=False, figsize=(8,2), h_edge_draw='blue', rows=N
         
         sz = 0.2
         col = 'black'
-        if t == 1: col = 'green'
-        elif t == 2: col = 'red'
+        if t == 1: col = 'white'
+        elif t == 2: col = 'black'
         else: sz = 0.1
             
         ax.add_patch(patches.Circle(p, sz, facecolor=col, edgecolor='black', zorder=1))

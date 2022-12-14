@@ -1,0 +1,6 @@
+// Initial wiring: [0, 1, 2, 3, 4]
+// Resulting wiring: [0, 1, 2, 3, 4]
+OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[5];
+x q[2];
