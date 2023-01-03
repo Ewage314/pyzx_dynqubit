@@ -193,7 +193,6 @@ class CNOTComb(CNOT_tracker):
         self.holes = holes
         self.new_to_old_qubit_mappings = new_to_old_qubit_mappings
 
-
 def rowcol_iteration(matrix, architecture, choice, rowcols_to_eliminate, circuit=None, full_reduce=True, permutation=None, **kwargs):
     """
     Single iteration of algorithm:
@@ -231,15 +230,25 @@ def rowcol_iteration(matrix, architecture, choice, rowcols_to_eliminate, circuit
     for edge in edges: # step 5
         row_add(edge[0], edge[1])
 
+    # Print intermediate matrix
+    debug and print(matrix)
+
     # Eliminate the row - Step 6-10
     debug and print("Eliminate the row")
     #debug and print(matrix)
     # Check if the row is already done to avoid some useless work.
     if sum(matrix.data[choice]) > 1:
         # System of linear equations https://stackabuse.com/solving-systems-of-linear-equations-with-pythons-numpy/
-        A_inv = Mat2([[matrix.data[row][col] for row in rowcols_to_eliminate if row != choice] for col  in rowcols_to_eliminate if col != choice]).inverse() # np.linalg.inv does not work on boolean matrices.
-        B = np.array([matrix.data[choice][col] for col in rowcols_to_eliminate if col != choice])
-        X = np.array(A_inv.data).dot(B)%2
+        #A_inv = Mat2([[matrix.data[row][col] for row in rowcols_to_eliminate if row != choice] for col  in rowcols_to_eliminate if col != choice]).inverse() # np.linalg.inv does not work on boolean matrices.
+        A_inv = matrix.copy().data
+        A_inv = np.delete(A_inv, choice, 0)
+        A_inv = np.delete(A_inv, choice, 1)
+        A_inv = np.linalg.pinv(A_inv)
+        #B = np.array([matrix.data[choice][col] for col in rowcols_to_eliminate if col != choice])
+        B = np.array(matrix.data[choice])
+        B = np.delete(B, choice, 0)
+        #X = np.array(A_inv.data).dot(B)%2
+        X = B.dot(A_inv)%2
         find_index = lambda i: [j for j in rowcols_to_eliminate if j != choice].index(i)
         nodes = [i for i in rowcols_to_eliminate if i == choice or X[find_index(i)]] # This is S'
         debug and print("System solution - X", X)
