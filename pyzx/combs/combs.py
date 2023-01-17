@@ -194,13 +194,14 @@ class CNOTComb(CNOT_tracker):
         self.new_to_old_qubit_mappings = new_to_old_qubit_mappings
 
 def rowcol_iteration(matrix, architecture, choice_row, choice_col, rows_to_eliminate, cols_to_eliminate, circuit=None, full_reduce=True, permutation=None, **kwargs):
+    debug = None
     """
     Single iteration of algorithm:
     https://arxiv.org/pdf/1910.14478.pdf
     To remove a chosen vertex (qubit)
     """
     def row_add(c0, c1):
-        print(f"Row Add : ({c0},{c1})")
+        debug and print(f"Row Add : ({c0},{c1})")
         matrix.row_add(c0, c1)
         if circuit: circuit.row_add(c0,c1)
 
@@ -242,12 +243,18 @@ def rowcol_iteration(matrix, architecture, choice_row, choice_col, rows_to_elimi
     if sum(matrix.data[choice_row]) > 1:
         # System of linear equations https://stackabuse.com/solving-systems-of-linear-equations-with-pythons-numpy/
         #A_inv = Mat2([[matrix.data[row][col] for row in rowcols_to_eliminate if row != choice] for col  in rowcols_to_eliminate if col != choice]).inverse() # np.linalg.inv does not work on boolean matrices.
-        A_inv = np.array([[matrix.data[row][col] for row in rows_to_eliminate if row != choice_row] for col  in cols_to_eliminate if col != choice_col])
-        A_inv = np.linalg.pinv(A_inv)
+        A = np.array([[matrix.data[row][col] for row in rows_to_eliminate if row != choice_row] for col  in cols_to_eliminate if col != choice_col])
+        debug and print(f"A : {A}")
+        A_inv = np.linalg.pinv(A)
+        debug and print(f"A Inverse :\n {A_inv}")
         #B = np.array([matrix.data[choice][col] for col in rowcols_to_eliminate if col != choice])
         B = np.array([matrix.data[choice_row][col] for col in cols_to_eliminate if col != choice_col])
-        #X = np.array(A_inv.data).dot(B)%2
-        X = B.dot(A_inv)%2
+        debug and print(f"B : {B}")
+        X = np.array(A_inv.data).dot(B)
+        debug and print(f"X :\n {X}")
+        X = np.mod(X.round(),2)
+        debug and print(f"X mod 2:\n {X}")
+        #X = B.dot(A_inv)%2
         find_index = lambda i: [j for j in rows_to_eliminate if j != choice_row].index(i)
         nodes = [i for i in rows_to_eliminate if i == choice_row or X[find_index(i)]] # This is S'
         debug and print("System solution - X", X)
@@ -265,6 +272,10 @@ def rowcol_iteration(matrix, architecture, choice_row, choice_col, rows_to_elimi
         while edge is not None: #Step 9
             row_add(edge[1], edge[0])
             edge = next(steiner_tree)
+
+    # Print intermediate matrix
+    debug and print(matrix)
+
     return None
 
 def rowcol(matrix, architecture, circuit=None, full_reduce=True, permutation=None, **kwargs):
