@@ -242,19 +242,12 @@ def rowcol_iteration(matrix, architecture, choice_row, choice_col, rows_to_elimi
     # Check if the row is already done to avoid some useless work.
     if sum(matrix.data[choice_row]) > 1:
         # System of linear equations https://stackabuse.com/solving-systems-of-linear-equations-with-pythons-numpy/
-        #A_inv = Mat2([[matrix.data[row][col] for row in rowcols_to_eliminate if row != choice] for col  in rowcols_to_eliminate if col != choice]).inverse() # np.linalg.inv does not work on boolean matrices.
-        A = np.array([[matrix.data[row][col] for row in rows_to_eliminate if row != choice_row] for col  in cols_to_eliminate if col != choice_col])
-        debug and print(f"A : {A}")
-        A_inv = np.linalg.pinv(A)
-        debug and print(f"A Inverse :\n {A_inv}")
-        #B = np.array([matrix.data[choice][col] for col in rowcols_to_eliminate if col != choice])
-        B = np.array([matrix.data[choice_row][col] for col in cols_to_eliminate if col != choice_col])
-        debug and print(f"B : {B}")
-        X = np.array(A_inv.data).dot(B)
-        debug and print(f"X :\n {X}")
-        X = np.mod(X.round(),2)
-        debug and print(f"X mod 2:\n {X}")
-        #X = B.dot(A_inv)%2
+        A_ = Mat2(np.array([[matrix.data[row][col] for row in rows_to_eliminate if row != choice_row] for col  in cols_to_eliminate if col != choice_col]))
+        B_ = Mat2(np.array([[matrix.data[choice_row][col]] for col in cols_to_eliminate if col != choice_col]))
+        A_.gauss(full_reduce=True, x=B_)
+        X = A_.data.transpose().dot(B_.data).flatten()
+
+
         find_index = lambda i: [j for j in rows_to_eliminate if j != choice_row].index(i)
         nodes = [i for i in rows_to_eliminate if i == choice_row or X[find_index(i)]] # This is S'
         debug and print("System solution - X", X)
