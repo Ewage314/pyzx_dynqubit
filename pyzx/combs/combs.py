@@ -247,7 +247,6 @@ def rowcol_iteration(matrix, architecture, choice_row, choice_col, rows_to_elimi
         A_.gauss(full_reduce=True, x=B_)
         X = A_.data.transpose().dot(B_.data).flatten()
 
-
         find_index = lambda i: [j for j in rows_to_eliminate if j != choice_row].index(i)
         nodes = [i for i in rows_to_eliminate if i == choice_row or X[find_index(i)]] # This is S'
         debug and print("System solution - X", X)
