@@ -53,32 +53,30 @@ class CombDecomposition(object):
                     gate.control = moving_qubit_mappings[gate.control]
 
                 if gate.target in open_holes.keys() or gate.control in open_holes.keys():
-                    if gate.target in open_holes.keys():
-                        qubit = gate.target
-                    else:
-                        qubit = gate.control
-                    hole_qubit_mappings[qubit] = qubits # Creating a new qubit and linking it this one
-                    # Check to see if we are mapping a qubit that has already been mapped
-                    # Allowing us to have a mapping from the initial qubit to the current one
-                    if qubit in moving_qubit_mappings.inverse.keys():
-                        temp_dict = bidict({moving_qubit_mappings.inverse.pop(qubit) : qubits})
-                        moving_qubit_mappings.update(temp_dict)
-                        new_to_old_qubit_mappings.update(temp_dict.inverse)
-                    # If this mapping isn't in the moving mapping added
-                    if qubit not in moving_qubit_mappings.keys() and qubits not in moving_qubit_mappings.inverse.keys():
-                        temp_dict = bidict({qubit: qubits})
-                        moving_qubit_mappings.update(temp_dict)
-                        new_to_old_qubit_mappings.update(temp_dict.inverse)
-                    hole_plugs[hole_qubit_mappings[qubit]] = open_holes.pop(qubit)
+                    for qubit in [gate.target, gate.control]:
+                        if qubit in open_holes.keys():
+                            hole_qubit_mappings[qubit] = qubits # Creating a new qubit and linking it this one
+                            # Check to see if we are mapping a qubit that has already been mapped
+                            # Allowing us to have a mapping from the initial qubit to the current one
+                            if qubit in moving_qubit_mappings.inverse.keys():
+                                temp_dict = bidict({moving_qubit_mappings.inverse.pop(qubit) : qubits})
+                                moving_qubit_mappings.update(temp_dict)
+                                new_to_old_qubit_mappings.update(temp_dict.inverse)
+                            # If this mapping isn't in the moving mapping added
+                            if qubit not in moving_qubit_mappings.keys() and qubits not in moving_qubit_mappings.inverse.keys():
+                                temp_dict = bidict({qubit: qubits})
+                                moving_qubit_mappings.update(temp_dict)
+                                new_to_old_qubit_mappings.update(temp_dict.inverse)
+                            hole_plugs[hole_qubit_mappings[qubit]] = open_holes.pop(qubit)
 
-                    qubits = qubits + 1
+                            qubits = qubits + 1
 
-                    # Need to do this again to correct for newly created mappings
-                    # Convert old qubit to new qubit using moving mappings
-                    if gate.target in hole_qubit_mappings.keys():
-                        gate.target = hole_qubit_mappings[gate.target]
-                    if gate.control in hole_qubit_mappings.keys():
-                        gate.control = hole_qubit_mappings[gate.control]
+                            # Need to do this again to correct for newly created mappings
+                            # Convert old qubit to new qubit using moving mappings
+                            if gate.target in hole_qubit_mappings.keys():
+                                gate.target = hole_qubit_mappings[gate.target]
+                            if gate.control in hole_qubit_mappings.keys():
+                                gate.control = hole_qubit_mappings[gate.control]
 
                 CNOTs_for_comb.append(gate)
 
@@ -134,15 +132,23 @@ class CombDecomposition(object):
             if CNOT_gate.target in comb.new_to_old_qubit_mappings.keys():
                 qubit = CNOT_gate.target
                 CNOT_gate.target = comb.new_to_old_qubit_mappings[CNOT_gate.target]
-            if CNOT_gate.control in comb.new_to_old_qubit_mappings.keys():
-                qubit = CNOT_gate.control
-                CNOT_gate.control = comb.new_to_old_qubit_mappings[CNOT_gate.control]
-           # Check if there is a hole plug that hasn't been used yet
+            # Check if there is a hole plug that hasn't been used yet
             if qubit in hole_plugs.keys():
                 # Need to convert gates back to original qubit
                 gates = gates + hole_plugs.pop(qubit)
                 # remove a qubit
                 qubits = qubits - 1
+
+            if CNOT_gate.control in comb.new_to_old_qubit_mappings.keys():
+                qubit = CNOT_gate.control
+                CNOT_gate.control = comb.new_to_old_qubit_mappings[CNOT_gate.control]
+            # Check if there is a hole plug that hasn't been used yet
+            if qubit in hole_plugs.keys():
+                # Need to convert gates back to original qubit
+                gates = gates + hole_plugs.pop(qubit)
+                # remove a qubit
+                qubits = qubits - 1
+
             gates.append(CNOT_gate)
         # Add any none CNOT gates that weren't causally before a CNOT
         for qubit in list(hole_plugs.keys()):
