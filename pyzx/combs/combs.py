@@ -124,31 +124,45 @@ class CombDecomposition(object):
         # Iterate through holes in
         comb = comb_decomposition.comb
         hole_plugs = comb_decomposition.hole_plugs
+        holes = comb.holes
         gates = []
         qubits = comb.qubits
         for CNOT_gate in list(comb.gates):
             qubit = None
-            # Check if CNOT comes after a hole
-            if CNOT_gate.target in comb.new_to_old_qubit_mappings.keys():
-                qubit = CNOT_gate.target
-                CNOT_gate.target = comb.new_to_old_qubit_mappings[CNOT_gate.target]
-            # Check if there is a hole plug that hasn't been used yet
-            if qubit in hole_plugs.keys():
-                # Need to convert gates back to original qubit
-                gates = gates + hole_plugs.pop(qubit)
-                # remove a qubit
-                qubits = qubits - 1
 
-            if CNOT_gate.control in comb.new_to_old_qubit_mappings.keys():
-                qubit = CNOT_gate.control
-                CNOT_gate.control = comb.new_to_old_qubit_mappings[CNOT_gate.control]
-            # Check if there is a hole plug that hasn't been used yet
-            if qubit in hole_plugs.keys():
-                # Need to convert gates back to original qubit
-                gates = gates + hole_plugs.pop(qubit)
-                # remove a qubit
-                qubits = qubits - 1
+            new_gates = []
+            for side in ["target", "control"]:
+                if side == "target":
+                    # Check if CNOT comes after a hole
+                    if CNOT_gate.target in comb.new_to_old_qubit_mappings.keys():
+                        qubit = CNOT_gate.target
+                        CNOT_gate.target = comb.new_to_old_qubit_mappings[CNOT_gate.target]
+                else:
+                    if CNOT_gate.control in comb.new_to_old_qubit_mappings.keys():
+                        qubit = CNOT_gate.control
+                        CNOT_gate.control = comb.new_to_old_qubit_mappings[CNOT_gate.control]
 
+                # Check if there is a hole plug that hasn't been used yet
+                if qubit in hole_plugs.keys():
+                    # Need to convert gates back to original qubit
+                    new_gates = hole_plugs.pop(qubit) + new_gates
+                    # remove a qubit
+                    qubits = qubits - 1
+                sequential_holes_filled = False
+                while not sequential_holes_filled:
+                    if qubit in holes.inverse.keys():
+                        qubit = holes.inverse[qubit]
+                        if qubit in hole_plugs.keys():
+                            # Need to convert gates back to original qubit
+                            new_gates = hole_plugs.pop(qubit) + new_gates
+                            # remove a qubit
+                            qubits = qubits - 1
+                        else:
+                            sequential_holes_filled = True
+                    else:
+                        sequential_holes_filled = True
+
+            gates = gates + new_gates
             gates.append(CNOT_gate)
         # Add any none CNOT gates that weren't causally before a CNOT
         for qubit in list(hole_plugs.keys()):
