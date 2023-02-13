@@ -261,7 +261,7 @@ def next_elimination(qubit_dependence, qubits_in_matrix, arch, rows_to_eliminate
     #print(f"Possible Eliminations : {possible_eliminations}")
     #print(f"Non Cutting Qubits : {non_cutting_qubits}")
 
-    eliminate = [elim for elim in possible_eliminations if (elim >= len(qubits_in_matrix) or elim in non_cutting_qubits)].pop()
+    eliminate = np.random.choice([elim for elim in possible_eliminations if (elim >= len(qubits_in_matrix) or elim in non_cutting_qubits)])
     #eliminate = possible_eliminations.pop()
     if Prn:
         print(f"Qubit Dependence : {qubit_dependence}")
@@ -503,6 +503,7 @@ def rowcol_iteration(matrix, architecture, choice_row, choice_col, rows_to_elimi
 
 
 def rowcol(matrix, architecture, circuit=None, full_reduce=True, permutation=None, **kwargs):
+    debug = None
     """
     https://arxiv.org/pdf/1910.14478.pdf
     """
