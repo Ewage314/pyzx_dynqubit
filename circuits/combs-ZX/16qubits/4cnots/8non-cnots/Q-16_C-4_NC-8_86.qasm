@@ -1,0 +1,15 @@
+OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[16];
+x q[2];
+z q[9];
+z q[5];
+x q[9];
+x q[0];
+cx q[7], q[8];
+z q[3];
+x q[5];
+cx q[15], q[14];
+z q[0];
+cx q[13], q[15];
+cx q[12], q[1];

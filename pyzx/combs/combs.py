@@ -270,6 +270,42 @@ def next_elimination(qubit_dependence, qubits_in_matrix, arch, rows_to_eliminate
         print(f"Eliminate : {eliminate}")
     return eliminate
 
+def next_elimination_matrix(sub_matrix, matrix, qubits_in_matrix, arch, rows_to_eliminate, cols_to_eliminate):
+    qubit_found = False
+    rows = range(sub_matrix.data.shape[0])
+    cols = range(sub_matrix.data.shape[1])
+    index = 0
+    #print(f"Sub Matrix : \n {sub_matrix}")
+    #print(f"Qubits in matrix : \n {qubits_in_matrix}")
+    M = sub_matrix.copy()
+    M.gauss(full_reduce=True)
+    possible_eliminations = []
+    # Find non-cutting vertices
+    non_cutting_vertices = arch.non_cutting_vertices(rows_to_eliminate)
+    non_cutting_qubits = [arch.vertex2qubit(v) for v in non_cutting_vertices]
+
+    for index in range(len(qubits_in_matrix)):
+        col = qubits_in_matrix[rows[index]]
+
+        # Check if the 1's in the column of the large matrix for this qubit are all qubits in the sub matrix
+        possible_to_eliminate = True
+        for k in [i for i in range(sub_matrix.data.shape[0]) if matrix.data[i][col] == 1]:
+            if k not in qubits_in_matrix:
+                possible_to_eliminate = False
+        if possible_to_eliminate:
+            if col in cols_to_eliminate:
+                # Get all the rows that have a 1 in the desired column
+                ones = [r for r in rows if M.data[r][col] == 1]
+                # Check that there is only one row with a 1 in it
+                if len(ones) == 1:
+                    row = ones.pop()
+                    # Check that the row only has one one in it
+                    if sum([M.data[row][c] for c in cols]) == 1:
+                        possible_eliminations.append(col)
+    #print(f"M : \n{M}")
+    #print(f"Possible Eliminations : {possible_eliminations}")
+    eliminate = np.random.choice([elim for elim in possible_eliminations if (elim >= len(qubits_in_matrix) or elim in non_cutting_qubits)])
+    return eliminate
 
 def combrowcol(circuit, arch, DEBUG, OUTER_DISPLAY, INNTER_DISPLAY, *args, **kwargs):
     circ = circuit.copy()
@@ -344,6 +380,7 @@ def combrowcol(circuit, arch, DEBUG, OUTER_DISPLAY, INNTER_DISPLAY, *args, **kwa
         sub_matrix = extract_sub_matrix(matrix, qubits_in_matrix)
         sub_circuit = CNOT_tracker(circ.qubits, parities_as_columns=False)
         col_to_eliminate = next_elimination(qubit_dependence, qubits_in_matrix, arch, rows_to_eliminate)
+        #col_to_eliminate = next_elimination_matrix(sub_matrix, matrix, qubits_in_matrix, arch, rows_to_eliminate, cols_to_eliminate)
         DEBUG and print(comb.holes)
         DEBUG and print(comb.new_to_old_qubit_mappings)
 
