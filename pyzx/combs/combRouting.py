@@ -21,8 +21,6 @@ def insert_sub_matrix(matrix, sub_matrix, index_list):
 
 
 def next_elimination(qubit_dependence, qubits_in_matrix, arch, rows_to_eliminate):
-    Prn = False
-
     # Use the qubit_dependence
     possible_eliminations = set(qubit_dependence.keys())
     # It's easier to find all the qubits that can't be eliminated by seeing all the qubits
@@ -89,9 +87,9 @@ def combrowcol(circuit, arch, DEBUG, OUTER_DISPLAY, INNTER_DISPLAY, *args, **kwa
     while 0 < len(cols_to_eliminate):
         # Generate sub matrix
         sub_matrix = extract_sub_matrix(matrix, qubits_in_matrix)
+        # Circuit to store the changes from this elimination
         sub_circuit = CNOT_tracker(circ.qubits, parities_as_columns=False)
         col_to_eliminate = next_elimination(qubit_dependence, qubits_in_matrix, arch, rows_to_eliminate)
-        #col_to_eliminate = next_elimination_matrix(sub_matrix, matrix, qubits_in_matrix, arch, rows_to_eliminate, cols_to_eliminate)
         DEBUG and print(comb.holes)
         DEBUG and print(comb.new_to_old_qubit_mappings)
 
@@ -104,7 +102,7 @@ def combrowcol(circuit, arch, DEBUG, OUTER_DISPLAY, INNTER_DISPLAY, *args, **kwa
 
         DEBUG and print(f"Qubit to eliminate {col_to_eliminate} ({row_to_eliminate})")
 
-        # Remove current rowcol from matrix
+        # Remove current row and column from matrix
         rowcol_iteration(sub_matrix,  # need to generate correct sub matrix
                          arch,
                          row_to_eliminate,  # rowcol needs to 'see' the virtual qubit as the original
@@ -114,7 +112,7 @@ def combrowcol(circuit, arch, DEBUG, OUTER_DISPLAY, INNTER_DISPLAY, *args, **kwa
                          circuit=sub_circuit)
         DEBUG and print(sub_circuit.gates)
 
-        # Convert the gates of the sub matrix using the mapping
+        # Convert the gates of the sub circuit using the mappings
         for gate in sub_circuit.gates[::-1]:
             gate.control = qubits_in_matrix[gate.control]
             gate.target = qubits_in_matrix[gate.target]
@@ -147,7 +145,7 @@ def combrowcol(circuit, arch, DEBUG, OUTER_DISPLAY, INNTER_DISPLAY, *args, **kwa
                         rows_to_eliminate.remove(qubit)
             qubit_loc += 1
 
-        # Remove the qubit that has just been eliminated from the connections
+        # Remove the qubit that has just been eliminated from the dependencies
         qubit_dependence.pop(col_to_eliminate)
         for qubit in qubit_dependence:
             if col_to_eliminate in qubit_dependence[qubit]:
@@ -155,7 +153,9 @@ def combrowcol(circuit, arch, DEBUG, OUTER_DISPLAY, INNTER_DISPLAY, *args, **kwa
 
         INNTER_DISPLAY and display(zx.draw(new_comb))
 
+    # Update the decomposition object with the new routed comb
     decomposition.comb = new_comb
+    # Convert the decomposition object into a now routed circuit
     new_circuit = CombDecomposition.to_circuit(decomposition)
     OUTER_DISPLAY and display(zx.draw(new_circuit))
     return new_circuit, (matrix.data == np.eye(comb.qubits, dtype=int)).all()

@@ -5,6 +5,8 @@ from ..parity_maps import CNOT_tracker
 
 class CombDecomposition(object):
     def __init__(self, comb, hole_plugs):
+        # Look into replacing hole_plugs with a comb object itself
+        # then use a stricter type system to know what combs can lock into each other
         self.comb = comb
         self.hole_plugs = hole_plugs
 
@@ -29,7 +31,7 @@ class CombDecomposition(object):
                 # We have found a none CNOT gate
                 # Check if it is already considered an open hole
                 if qubit not in open_holes.keys():
-                # Add it's target qubit as an output for the hole
+                    # Add it's target qubit as an output for the hole
                     open_holes[qubit] = [gate]
                 else:
                     open_holes[qubit].append(gate)
@@ -43,7 +45,7 @@ class CombDecomposition(object):
                 if gate.target in open_holes.keys() or gate.control in open_holes.keys():
                     for qubit in [gate.target, gate.control]:
                         if qubit in open_holes.keys():
-                            hole_qubit_mappings[qubit] = qubits # Creating a new qubit and linking it this one
+                            hole_qubit_mappings[qubit] = qubits # Creating a new qubit and link it to this one
                             # Check to see if we are mapping a qubit that has already been mapped
                             # Allowing us to have a mapping from the initial qubit to the current one
                             if qubit in moving_qubit_mappings.inverse.keys():
@@ -151,7 +153,7 @@ class CombDecomposition(object):
         return circuit
 
 
-# A CNOT comb is a CNOT circuit with additional causual constraints given by the holes
+# A CNOT comb is a CNOT circuit with additional causal constraints given by the holes
 class CNOTComb(CNOT_tracker):
     def __init__(self, n_qubits, holes, new_to_old_qubit_mappings, **kwargs):
         super().__init__(n_qubits)
